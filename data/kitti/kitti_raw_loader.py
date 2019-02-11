@@ -26,7 +26,6 @@ class kitti_raw_loader(object):
                           '2011_09_30', '2011_10_03']
         self.collect_static_frames(static_frames_file)
         self.collect_train_frames()
-
     def collect_static_frames(self, static_frames_file):
         with open(static_frames_file, 'r') as f:
             frames = f.readlines()
