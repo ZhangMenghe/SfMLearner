@@ -8,6 +8,24 @@ import numpy as np
 DISP_SCALING = 10
 MIN_DISP = 0.01
 
+def pred_norm(inputs, upsample_shape, scope='norm'):
+    """Generates a 3-channel norm map
+       
+       output:
+           norm: the 3-channel norm
+           upsampled_norm: the predicted upsampled to match `upsample_shape`
+    """
+    norm = slim.conv2d(inputs, 3,   [3, 3], stride=1, 
+             activation_fn=tf.sigmoid, normalizer_fn=None, scope=scope)
+    
+    upsampled_norm = None
+    if upsample_shape is not None:
+        upsampled_norm = tf.image.resize_bilinear(norm, upsample_shape, name=scope+'_upsample')
+        upsampled_norm = tf.cast(upsampled_norm, dtype=tf.float64)
+        
+    return norm, upsampled_norm
+
+############################################################
 def resize_like(inputs, ref):
     iH, iW = inputs.get_shape()[1], inputs.get_shape()[2]
     rH, rW = ref.get_shape()[1], ref.get_shape()[2]
@@ -95,7 +113,8 @@ def disp_net(tgt_image, is_training=True):
             cnv6b = slim.conv2d(cnv6,  512, [3, 3], stride=1, scope='cnv6b')
             cnv7  = slim.conv2d(cnv6b, 512, [3, 3], stride=2, scope='cnv7')
             cnv7b = slim.conv2d(cnv7,  512, [3, 3], stride=1, scope='cnv7b')
-
+            
+            
             upcnv7 = slim.conv2d_transpose(cnv7b, 512, [3, 3], stride=2, scope='upcnv7')
             # There might be dimension mismatch due to uneven down/up-sampling
             upcnv7 = resize_like(upcnv7, cnv6b)
@@ -142,3 +161,71 @@ def disp_net(tgt_image, is_training=True):
             end_points = utils.convert_collection_to_dict(end_points_collection)
             return [disp1, disp2, disp3, disp4], end_points
 
+def normal_net(tgt_image, is_training=True):
+    H = tgt_image.get_shape()[1].value
+    W = tgt_image.get_shape()[2].value
+    
+    # reuse the weights in disp_net
+    with tf.variable_scope('depth_net', reuse=True) as sc:
+        cnv1  = slim.conv2d(tgt_image, 32,  [7, 7], stride=2, scope='cnv1', reuse=True)
+        cnv1b = slim.conv2d(cnv1,  32,  [7, 7], stride=1, scope='cnv1b'   , reuse=True)
+        cnv2  = slim.conv2d(cnv1b, 64,  [5, 5], stride=2, scope='cnv2'    , reuse=True)
+        cnv2b = slim.conv2d(cnv2,  64,  [5, 5], stride=1, scope='cnv2b'   , reuse=True)
+        cnv3  = slim.conv2d(cnv2b, 128, [3, 3], stride=2, scope='cnv3'    , reuse=True)
+        cnv3b = slim.conv2d(cnv3,  128, [3, 3], stride=1, scope='cnv3b'   , reuse=True)
+        cnv4  = slim.conv2d(cnv3b, 256, [3, 3], stride=2, scope='cnv4'    , reuse=True)
+        cnv4b = slim.conv2d(cnv4,  256, [3, 3], stride=1, scope='cnv4b'   , reuse=True)
+        cnv5  = slim.conv2d(cnv4b, 512, [3, 3], stride=2, scope='cnv5'    , reuse=True)
+        cnv5b = slim.conv2d(cnv5,  512, [3, 3], stride=1, scope='cnv5b'   , reuse=True)
+        cnv6  = slim.conv2d(cnv5b, 512, [3, 3], stride=2, scope='cnv6'    , reuse=True)
+        cnv6b = slim.conv2d(cnv6,  512, [3, 3], stride=1, scope='cnv6b'   , reuse=True)
+        cnv7  = slim.conv2d(cnv6b, 512, [3, 3], stride=2, scope='cnv7'    , reuse=True)
+        cnv7b = slim.conv2d(cnv7,  512, [3, 3], stride=1, scope='cnv7b'   , reuse=True)
+    
+    with tf.variable_scope('normal_net') as sc:
+        end_points_collection = sc.original_name_scope + '_end_points'
+        with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
+                            normalizer_fn=None,
+                            weights_regularizer=slim.l2_regularizer(0.05),
+                            activation_fn=tf.nn.relu,
+                            outputs_collections=end_points_collection):
+            
+            upcnv7 = slim.conv2d_transpose(cnv7b, 512, [3, 3], stride=2, scope='upcnv7')
+            # There might be dimension mismatch due to uneven down/up-sampling
+            upcnv7 = resize_like(upcnv7, cnv6b)
+            i7_in  = tf.concat([upcnv7, cnv6b], axis=3)
+            icnv7  = slim.conv2d(i7_in, 512, [3, 3], stride=1, scope='icnv7')
+
+            upcnv6 = slim.conv2d_transpose(icnv7, 512, [3, 3], stride=2, scope='upcnv6')
+            upcnv6 = resize_like(upcnv6, cnv5b)
+            i6_in  = tf.concat([upcnv6, cnv5b], axis=3)
+            icnv6  = slim.conv2d(i6_in, 512, [3, 3], stride=1, scope='icnv6')
+
+            upcnv5 = slim.conv2d_transpose(icnv6, 256, [3, 3], stride=2, scope='upcnv5')
+            upcnv5 = resize_like(upcnv5, cnv4b)
+            i5_in  = tf.concat([upcnv5, cnv4b], axis=3)
+            icnv5  = slim.conv2d(i5_in, 256, [3, 3], stride=1, scope='icnv5')
+
+            upcnv4 = slim.conv2d_transpose(icnv5, 128, [3, 3], stride=2, scope='upcnv4')
+            i4_in  = tf.concat([upcnv4, cnv3b], axis=3)
+            icnv4  = slim.conv2d(i4_in, 128, [3, 3], stride=1, scope='icnv4')
+            norm4, norm4_up = pred_norm(icnv4, upsample_shape=[np.int(H/4), np.int(W/4)], scope='norm4')
+
+            upcnv3 = slim.conv2d_transpose(icnv4, 64,  [3, 3], stride=2, scope='upcnv3')
+            i3_in  = tf.concat([upcnv3, cnv2b, norm4_up], axis=3)
+            icnv3  = slim.conv2d(i3_in, 64,  [3, 3], stride=1, scope='icnv3')
+            norm3, norm3_up  = pred_norm(icnv3, upsample_shape=[np.int(H/2), np.int(W/2)], scope='norm3')
+
+            upcnv2 = slim.conv2d_transpose(icnv3, 32,  [3, 3], stride=2, scope='upcnv2')
+            i2_in  = tf.concat([upcnv2, cnv1b, norm3_up], axis=3)
+            icnv2  = slim.conv2d(i2_in, 32,  [3, 3], stride=1, scope='icnv2')
+            norm2, norm2_up  = pred_norm(icnv2, upsample_shape=[H, W], scope='norm2')
+
+            upcnv1 = slim.conv2d_transpose(icnv2, 16,  [3, 3], stride=2, scope='upcnv1')
+            i1_in  = tf.concat([upcnv1, norm2_up], axis=3)
+            icnv1  = slim.conv2d(i1_in, 16,  [3, 3], stride=1, scope='icnv1')
+            norm1, _  = pred_norm(icnv2, upsample_shape=None, scope='norm1')
+    
+            end_points = utils.convert_collection_to_dict(end_points_collection)
+        
+    return [norm1, norm2, norm3, norm4], end_points
