@@ -3,10 +3,12 @@ import numpy as np
 from glob import glob
 import os
 import scipy.misc
+import kitti.segmentation_util as seg
 
 class kitti_raw_loader(object):
     def __init__(self, 
                  dataset_dir,
+                 seg_model_dir,
                  split,
                  img_height=256,
                  img_width=256,
@@ -18,6 +20,7 @@ class kitti_raw_loader(object):
             test_scenes = f.readlines()
         self.test_scenes = [t[:-1] for t in test_scenes]
         self.dataset_dir = dataset_dir
+        self.seg_model_dir = seg_model_dir
         self.img_height = img_height
         self.img_width = img_width
         self.seq_length = seq_length
@@ -26,6 +29,8 @@ class kitti_raw_loader(object):
                           '2011_09_30', '2011_10_03']
         self.collect_static_frames(static_frames_file)
         self.collect_train_frames()
+        ## load segmentation model
+        self.seg_model = seg.segmentation_util(seg_model_dir)
     def collect_static_frames(self, static_frames_file):
         with open(static_frames_file, 'r') as f:
             frames = f.readlines()
@@ -95,8 +100,9 @@ class kitti_raw_loader(object):
             if o == 0:
                 zoom_y = self.img_height/curr_img.shape[0]
                 zoom_x = self.img_width/curr_img.shape[1]
+            mask = self.seg_model.inference(scipy.misc.imresize(curr_img, (303, 1002)), self.img_height, self.img_width)
             curr_img = scipy.misc.imresize(curr_img, (self.img_height, self.img_width))
-            image_seq.append(curr_img)
+            image_seq.append(np.dstack((curr_img, mask)))
         return image_seq, zoom_x, zoom_y
 
     def load_example(self, frames, tgt_idx):
