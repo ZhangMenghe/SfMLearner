@@ -1,4 +1,5 @@
 from __future__ import division
+from check_matplotlib import *
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf

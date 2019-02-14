@@ -2,6 +2,7 @@ from __future__ import division
 import os
 import random
 import tensorflow as tf
+import numpy as np
 
 class DataLoader(object):
     def __init__(self, 
@@ -54,21 +55,24 @@ class DataLoader(object):
         raw_cam_vec = tf.stack(raw_cam_vec)
         intrinsics = tf.reshape(raw_cam_vec, [3, 3])
 
+        proj_cam2pix, proj_pix2cam = self.get_multi_scale_intrinsics(
+            intrinsics, self.num_scales)
+        # TODO: Data augmentation
+        # image_all = tf.concat([tgt_image, src_image_stack], axis=3)
+        # image_all, intrinsics = self.data_augmentation(
+        #     image_all, intrinsics, self.img_height, self.img_width)
+        # tgt_image = image_all[:, :, :, :3]
+        # src_image_stack = image_all[:, :, :, 3:]
+
         # Form training batches
-        src_image_stack, tgt_image, intrinsics = \
-                tf.train.batch([src_image_stack, tgt_image, intrinsics], 
+        src_image_stack, tgt_image, proj_cam2pix, proj_pix2cam = \
+                tf.train.batch([src_image_stack, tgt_image, proj_cam2pix, proj_pix2cam], 
                                batch_size=self.batch_size)
 
-        # Data augmentation
-        image_all = tf.concat([tgt_image, src_image_stack], axis=3)
-        image_all, intrinsics = self.data_augmentation(
-            image_all, intrinsics, self.img_height, self.img_width)
-        tgt_image = image_all[:, :, :, :3]
-        src_image_stack = image_all[:, :, :, 3:]
-        intrinsics = self.get_multi_scale_intrinsics(
-            intrinsics, self.num_scales)
-        return tgt_image, src_image_stack, intrinsics
-
+        return tgt_image, src_image_stack, proj_cam2pix, proj_pix2cam
+    def load_semantic_image(self):
+        semantic_image = np.zeros([self.img_height, self.img_width, 3])
+        return semantic_image
     def make_intrinsics_matrix(self, fx, fy, cx, cy):
         # Assumes batch input
         batch_size = fx.get_shape().as_list()[0]
@@ -179,14 +183,19 @@ class DataLoader(object):
         return tgt_image, src_image_stack
 
     def get_multi_scale_intrinsics(self, intrinsics, num_scales):
-        intrinsics_mscale = []
+        proj_cam2pix = []
         # Scale the intrinsics accordingly for each scale
         for s in range(num_scales):
-            fx = intrinsics[:,0,0]/(2 ** s)
-            fy = intrinsics[:,1,1]/(2 ** s)
-            cx = intrinsics[:,0,2]/(2 ** s)
-            cy = intrinsics[:,1,2]/(2 ** s)
-            intrinsics_mscale.append(
-                self.make_intrinsics_matrix(fx, fy, cx, cy))
-        intrinsics_mscale = tf.stack(intrinsics_mscale, axis=1)
-        return intrinsics_mscale
+            fx = intrinsics[0,0]/(2 ** s)
+            fy = intrinsics[1,1]/(2 ** s)
+            cx = intrinsics[0,2]/(2 ** s)
+            cy = intrinsics[1,2]/(2 ** s)
+            r1 = tf.stack([fx, 0, cx])
+            r2 = tf.stack([0, fy, cy])
+            r3 = tf.constant([0.,0.,1.])
+            proj_cam2pix.append(tf.stack([r1, r2, r3]))
+        proj_cam2pix = tf.stack(proj_cam2pix)
+        proj_pix2cam = tf.matrix_inverse(proj_cam2pix)
+        proj_cam2pix.set_shape([num_scales,3,3])
+        proj_pix2cam.set_shape([num_scales,3,3])
+        return proj_cam2pix, proj_pix2cam

@@ -22,7 +22,11 @@ class SfMLearner(object):
                             opt.num_source,
                             opt.num_scales)
         with tf.name_scope("data_loading"):
-            tgt_image, src_image_stack, intrinsics = loader.load_train_batch()
+            # Load batch data
+            # tgt_image[batch;img_height, img_width, 3]
+            # src_image[batch;img_height,img_width, num_source * 3]
+            # proj_cam2pix, proj_pix2cam [batch; 3; 3] 
+            tgt_image, src_image_stack, proj_cam2pix, proj_pix2cam = loader.load_train_batch()
             tgt_image = self.preprocess_image(tgt_image)
             src_image_stack = self.preprocess_image(src_image_stack)
 
@@ -37,39 +41,58 @@ class SfMLearner(object):
                              src_image_stack, 
                              do_exp=(opt.explain_reg_weight > 0),
                              is_training=True)
+        with tf.name_scope("semantic_loading"):
+            #TODO:check semantic info shape and decide what to do
+            semantic_image = loader.load_semantic_image()
 
         with tf.name_scope("compute_loss"):
+            # three loss from SfM learner
             pixel_loss = 0
             exp_loss = 0
             smooth_loss = 0
-            tgt_image_all = []
-            src_image_stack_all = []
-            proj_image_stack_all = []
+
+            # more loss
+            normal_smooth_loss = 0
+            img_grad_loss = 0
+            edge_loss = 0 #TODO:edge awareness may come from semantic info
+
+            # save arrays from SfM
+            tgt_image_all = [] #target(multi-scale images)
+            src_image_stack_all = [] #source image
+            proj_image_stack_all = [] #Inverse warp the source image to the target image
             proj_error_stack_all = []
-            exp_mask_stack_all = []
+            exp_mask_stack_all = [] # Expalnibility mask
+
+            # Depth-Normal Constrains
+            pred_normals = []
+            pred_disp_from_norm_stack = []
+            flyout_map_all = []#TODO:what's this for??
+            edge_mask_all = [] #TODO:is this necessary?
+            depth_inverse = False
             for s in range(opt.num_scales):
+                # Construct a reference explainability mask (i.e. all pixels are explainable)
                 if opt.explain_reg_weight > 0:
-                    # Construct a reference explainability mask (i.e. all 
-                    # pixels are explainable)
                     ref_exp_mask = self.get_reference_explain_mask(s)
-                # Scale the source and target images for computing loss at the 
-                # according scale.
+                
+                # Scale the source and target images for computing loss at the according scale.
                 curr_tgt_image = tf.image.resize_area(tgt_image, 
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])                
                 curr_src_image_stack = tf.image.resize_area(src_image_stack, 
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
 
+                # depth <-> normal constrain
                 if opt.smooth_weight > 0:
                     smooth_loss += opt.smooth_weight/(2**s) * \
                         self.compute_smooth_loss(pred_disp[s])
 
+                # Inverse warp each source image to the target image frame
                 for i in range(opt.num_source):
-                    # Inverse warp the source image to the target image frame
+                    
                     curr_proj_image = projective_inverse_warp(
                         curr_src_image_stack[:,:,:,3*i:3*(i+1)], 
                         tf.squeeze(pred_depth[s], axis=3), 
                         pred_poses[:,i,:], 
-                        intrinsics[:,s,:,:])
+                        proj_cam2pix[:,s,:,:])
                     curr_proj_error = tf.abs(curr_proj_image - curr_tgt_image)
                     # Cross-entropy loss as regularization for the 
                     # explainability prediction
@@ -201,9 +224,6 @@ class SfMLearner(object):
         #     tf.summary.histogram(var.op.name + "/gradients", grad)
 
     def train(self, opt):
-        opt.num_source = opt.seq_length - 1
-        # TODO: currently fixed to 4
-        opt.num_scales = 4
         self.opt = opt
         self.build_train_graph()
         self.collect_summaries()
