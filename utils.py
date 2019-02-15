@@ -193,7 +193,7 @@ def projective_inverse_warp(img, depth, pose, intrinsics):
   src_pixel_coords = cam2pixel(cam_coords, proj_tgt_cam_to_src_pixel)
   output_img = bilinear_sampler(img, src_pixel_coords)
   return output_img
-
+  
 def bilinear_sampler(imgs, coords):
   """Construct a new image by bilinear sampling from the input image.
 
