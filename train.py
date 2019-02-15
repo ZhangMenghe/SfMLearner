@@ -15,6 +15,8 @@ flags.DEFINE_float("beta1", 0.9, "Momentum term of adam")
 flags.DEFINE_float("smooth_weight", 0.5, "Weight for smoothness")
 flags.DEFINE_float("normal_smooth_weight", 0.5,"Weight for normal map smoothness")
 flags.DEFINE_float("explain_reg_weight", 0.0, "Weight for explanability regularization")
+flags.DEFINE_float("ssim_weight", 1.0, "Weight for using ssim loss in pixel loss")#Structural similarity
+flags.DEFINE_float("img_grad_weight", 0.0, "Weight for image gradient warping")
 flags.DEFINE_integer("batch_size", 4, "The size of of a sample batch")
 flags.DEFINE_integer("img_height", 128, "Image height")
 flags.DEFINE_integer("img_width", 416, "Image width")

@@ -14,7 +14,10 @@ from normal2depth_tf import *
 class SfMLearner(object):
     def __init__(self):
         pass
-    
+    def gradient(self, pred):
+        D_dy = pred[:, 1:, :, :] - pred[:, :-1, :, :]
+        D_dx = pred[:, :, 1:, :] - pred[:, :, :-1, :]
+        return D_dx, D_dy
     def build_train_graph(self):
         opt = self.opt
         loader = DataLoader(opt.dataset_dir,
@@ -112,16 +115,21 @@ class SfMLearner(object):
                         # self.compute_smooth_loss_wedge(pred_normal[:, 3:-3, 3:-3, :], pred_edges[s][:,3:-3,3:-3,], mode='l2', alpha=0.1))
                         self.compute_smooth_loss(pred_normal[:, 3:-3, 3:-3, :]))
 
-
-                # Inverse warp each source image to the target image frame
+                curr_tgt_image_grad_x, curr_tgt_image_grad_y = self.gradient(curr_tgt_image[:, :-2, 1:-1, :])
+                curr_src_image_grad_x, curr_src_image_grad_y = self.gradient(curr_src_image_stack[:, :-2, 1:-1 :])
+                
                 for i in range(opt.num_source):
-                    
+                    # Inverse warp the source image to the target image frame
+                    # Use pred_depth and 8 pred_depth2 maps for inverse warping
                     curr_proj_image = projective_inverse_warp(
                         curr_src_image_stack[:,:,:,3*i:3*(i+1)], 
-                        tf.squeeze(pred_depth[s], axis=3), 
-                        pred_poses[:,i,:], 
-                        proj_cam2pix[:,s,:,:])
+                        pred_depth_from_normal, 
+                        pred_poses[:,i,:], # [batchsize, num_source, 6] 
+                        proj_cam2pix[:,s,:,:],# [batchsize, scale, 3, 3]
+                        proj_pix2cam[:,s,:,:],
+                        curr_tgt_image) 
                     curr_proj_error = tf.abs(curr_proj_image - curr_tgt_image)
+
                     # Cross-entropy loss as regularization for the 
                     # explainability prediction
                     if opt.explain_reg_weight > 0:
@@ -132,12 +140,27 @@ class SfMLearner(object):
                             self.compute_exp_reg_loss(curr_exp_logits,
                                                       ref_exp_mask)
                         curr_exp = tf.nn.softmax(curr_exp_logits)
+
                     # Photo-consistency loss weighted by explainability
                     if opt.explain_reg_weight > 0:
                         pixel_loss += tf.reduce_mean(curr_proj_error * \
                             tf.expand_dims(curr_exp[:,:,:,1], -1))
                     else:
                         pixel_loss += tf.reduce_mean(curr_proj_error) 
+
+                    # Structure Similarity
+                    if opt.ssim_weight > 0:
+                        pixel_loss += opt.ssim_weight * tf.reduce_mean(SSIM(curr_proj_image, curr_tgt_image))
+                    
+                    # Gradient Loss
+                    if opt.img_grad_weight > 0:
+                        curr_proj_image_grad_x, curr_proj_image_grad_y = self.gradient(curr_proj_image[:, :-2, 1:-1, :])
+                        curr_proj_error_grad_x, curr_proj_error_grad_y = tf.abs(curr_tgt_image_grad_x-curr_proj_image_grad_x), \
+                                                                tf.abs(curr_tgt_image_grad_y-curr_proj_image_grad_y)
+
+                        img_grad_loss += opt.img_grad_weight * tf.reduce_mean(curr_proj_error_grad_x)
+                        img_grad_loss += opt.img_grad_weight * tf.reduce_mean(curr_proj_error_grad_y)
+
                     # Prepare images for tensorboard summaries
                     if i == 0:
                         proj_image_stack = curr_proj_image
@@ -158,7 +181,7 @@ class SfMLearner(object):
                 proj_error_stack_all.append(proj_error_stack)
                 if opt.explain_reg_weight > 0:
                     exp_mask_stack_all.append(exp_mask_stack)
-            total_loss = pixel_loss + normal_smooth_loss + smooth_loss + exp_loss
+            total_loss = pixel_loss + smooth_loss + normal_smooth_loss + img_grad_loss + exp_loss
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]
@@ -205,13 +228,9 @@ class SfMLearner(object):
         return tf.reduce_mean(l)
 
     def compute_smooth_loss(self, pred_disp):
-        def gradient(pred):
-            D_dy = pred[:, 1:, :, :] - pred[:, :-1, :, :]
-            D_dx = pred[:, :, 1:, :] - pred[:, :, :-1, :]
-            return D_dx, D_dy
-        dx, dy = gradient(pred_disp)
-        dx2, dxdy = gradient(dx)
-        dydx, dy2 = gradient(dy)
+        dx, dy = self.gradient(pred_disp)
+        dx2, dxdy = self.gradient(dx)
+        dydx, dy2 = self.gradient(dy)
         return tf.reduce_mean(tf.abs(dx2)) + \
                tf.reduce_mean(tf.abs(dxdy)) + \
                tf.reduce_mean(tf.abs(dydx)) + \
