@@ -8,6 +8,8 @@ import tensorflow.contrib.slim as slim
 from data_loader import DataLoader
 from nets import *
 from utils import *
+from depth2normal_tf import *
+from normal2depth_tf import *
 
 class SfMLearner(object):
     def __init__(self):
@@ -81,9 +83,35 @@ class SfMLearner(object):
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
 
                 # depth <-> normal constrain
+                ## depth2normal and normal2depth at each scale level
+                cam_mat = proj_cam2pix[:,s,:,:] #[batch;3;3]
+                # just extract fx, fy, cx, cy of each intrinsic[batch; 4]
+                intrinsic_params = tf.concat([tf.expand_dims(cam_mat[:,0,0],1),\
+                                              tf.expand_dims(cam_mat[:,1,1],1), \
+                                              tf.expand_dims(cam_mat[:,0,2],1), \
+                                              tf.expand_dims(cam_mat[:,1,2],1)], 1)
+                pred_depth_tensor = tf.squeeze(pred_depth[s])
+
+                pred_normal = depth2normal_layer_batch(pred_depth_tensor, intrinsic_params, depth_inverse)
+
+                pred_depth_from_normal = normal2depth_layer_batch(pred_depth_tensor, tf.squeeze(pred_normal), intrinsic_params, curr_tgt_image)
+                pred_depth_from_normal = tf.expand_dims(pred_depth_from_normal, -1)
+                pred_disp_from_normal = 1.0 / pred_depth_from_normal
+
+                pred_normals.append(pred_normal)
+                pred_disp_from_norm_stack.append(pred_disp_from_normal)
+
+
                 if opt.smooth_weight > 0:
                     smooth_loss += opt.smooth_weight/(2**s) * \
-                        self.compute_smooth_loss(pred_disp[s])
+                        self.compute_smooth_loss(pred_disp_from_norm_stack[s])
+
+                if opt.normal_smooth_weight > 0:
+                    normal_smooth_loss += tf.multiply(opt.normal_smooth_weight/(2**s), \
+                        # self.compute_edge_aware_smooth_loss(pred_normal[:,3:-3,3:-3,:], ))
+                        # self.compute_smooth_loss_wedge(pred_normal[:, 3:-3, 3:-3, :], pred_edges[s][:,3:-3,3:-3,], mode='l2', alpha=0.1))
+                        self.compute_smooth_loss(pred_normal[:, 3:-3, 3:-3, :]))
+
 
                 # Inverse warp each source image to the target image frame
                 for i in range(opt.num_source):
@@ -130,7 +158,7 @@ class SfMLearner(object):
                 proj_error_stack_all.append(proj_error_stack)
                 if opt.explain_reg_weight > 0:
                     exp_mask_stack_all.append(exp_mask_stack)
-            total_loss = pixel_loss + smooth_loss + exp_loss
+            total_loss = pixel_loss + normal_smooth_loss + smooth_loss + exp_loss
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]

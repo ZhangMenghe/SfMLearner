@@ -1,7 +1,7 @@
 #!/bin/bash
 
 v_format_data_path=../KITTI-FORMAT/
-v_checkpoint_dir=mchekpoint/
+v_checkpoint_dir=checkpoints/
 v_img_width=416
 v_img_height=128
 v_batch_size=4

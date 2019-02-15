@@ -13,6 +13,7 @@ flags.DEFINE_string("init_checkpoint_file", None, "Specific checkpoint file to i
 flags.DEFINE_float("learning_rate", 0.0002, "Learning rate of for adam")
 flags.DEFINE_float("beta1", 0.9, "Momentum term of adam")
 flags.DEFINE_float("smooth_weight", 0.5, "Weight for smoothness")
+flags.DEFINE_float("normal_smooth_weight", 0.5,"Weight for normal map smoothness")
 flags.DEFINE_float("explain_reg_weight", 0.0, "Weight for explanability regularization")
 flags.DEFINE_integer("batch_size", 4, "The size of of a sample batch")
 flags.DEFINE_integer("img_height", 128, "Image height")
@@ -36,12 +37,12 @@ def main(_):
 
     pp = pprint.PrettyPrinter()
     pp.pprint(flags.FLAGS.__flags)
-    
+
     if not os.path.exists(FLAGS.checkpoint_dir):
         os.makedirs(FLAGS.checkpoint_dir)
-    with tf.device('/gpu:0'):   
-        sfm = SfMLearner()
-        sfm.train(FLAGS)
+      
+    sfm = SfMLearner()
+    sfm.train(FLAGS)
 
 if __name__ == '__main__':
     tf.app.run()
