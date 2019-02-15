@@ -171,7 +171,7 @@ class SfMLearner(object):
                tf.reduce_mean(tf.abs(dydx)) + \
                tf.reduce_mean(tf.abs(dy2))
 
-    def compute_normal_depth_loss(self, img, pred_disp, pred_norm,
+    def compute_normal_depth_loss(self, img, pred_disp, pred_norm, intrinsics,
                                     alpha=0.1, n_shift=3, inverse_depth=True):
         """Compute the dot product of normals and the 8-neighbor vectors
 
@@ -179,6 +179,7 @@ class SfMLearner(object):
             img: target RGB image [batch, H, W, 3]
             pred_disp: predicted depth or inverse depth [batch, H, W, 1]
             pred_norm: predicted surface normals [batch, H, W, 3]
+            intrinsics: camera intrinsics [batch, 3, 3]
             alpha: hyperparameter used to weight 8-neighbor vectors by pixel intensity difference
             n_shift: pixels to shift when calculating 8-neighbor vectors
             inverse_depth: set to `True` if the input `pred_disp` is inverse depth
@@ -188,9 +189,11 @@ class SfMLearner(object):
         """
 
         batch, height, width, _ = pred_disp.get_shape().as_list()
-        mask = tf.greater(pred_disp, tf.zeros_like(pred_disp)) # mask indicating nonzero depth values
+        depth_map = tf.squeeze(pred_disp) # squeeze to [batch, H, W]
+        mask = tf.greater(depth_map, tf.zeros_like(depth_map)) # mask indicating nonzero depth values
         mask = tf.cast(mask, tf.float32)
-        depth_map = tf.identity(pred_disp) # a copy of `pred_disp`
+        print(pred_disp)
+        print(depth_map)
 
         # convert inverse depth to depth by assigning `eps` to every pixel with 0 inverse depth
         # then inversing the inverse depth map
@@ -205,7 +208,7 @@ class SfMLearner(object):
         pixel_coords = meshgrid(batch, height, width)
         cam_coords = pixel2cam(depth_map, pixel_coords, intrinsics, is_homogeneous=False) #[batch, 3, height, width]
         # note that `cam_coords` has shape [batch, 3, height, width]
-        img = tf.transpose(cam_coords, perm=[0, 2, 3, 1]) # [batch, height, width, 3]
+        pts_3d_map = tf.transpose(cam_coords, perm=[0, 2, 3, 1]) # [batch, height, width, 3]
 
         # copied from https://github.com/zhenheny/LEGO/blob/master/depth2normal/depth2normal_tf.py
         nei = n_shift
@@ -282,7 +285,7 @@ class SfMLearner(object):
         for v in range(8):
             element_wise_prod = tf.multiply(diff_pad[v, :, :, :, :], pred_norm[:, :, :, :]) # [batch, H, W, 3]
             dot_prod = tf.reduce_sum(element_wise_prod, axis=3)
-            loss += tf.multiply(w[v, :, :, :], dot_prod)
+            loss += tf.reduce_sum(tf.multiply(w[v, :, :, :], dot_prod), axis=[1, 2])
 
         return loss
 
