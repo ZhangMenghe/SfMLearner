@@ -47,6 +47,8 @@ class SfMLearner(object):
             pixel_loss = 0
             exp_loss = 0
             smooth_loss = 0
+            normal_dot_prod_loss = 0
+            normal_reg_loss = 0
             tgt_image_all = []
             src_image_stack_all = []
             proj_image_stack_all = []
@@ -67,6 +69,25 @@ class SfMLearner(object):
                 if opt.smooth_weight > 0:
                     smooth_loss += opt.smooth_weight/(2**s) * \
                         self.compute_smooth_loss(pred_disp[s])
+
+                # Compute normal dot product loss
+                if opt.normal_depth_constraint_weight > 0:
+                    normal_dot_prod_loss += \
+                        tf.reduce_mean(
+                            opt.normal_depth_constraint_weight/(2**s) * \
+                            self.compute_normal_depth_loss(curr_tgt_image,
+                                                        pred_disp[s],
+                                                        pred_norm[s],
+                                                        intrinsics[:, s, :, :],
+                                                        alpha=0.1,
+                                                        n_shift=3,
+                                                        inverse_depth=True)
+                        )
+
+                # Compute normal regularization loss
+                if opt.normal_reg_weight > 0:
+                    normal_reg_loss += opt.normal_reg_weight/(2**s) * \
+                        self.compute_normal_reg_loss(pred_norm[s])
 
                 for i in range(opt.num_source):
                     # Inverse warp the source image to the target image frame
@@ -92,6 +113,7 @@ class SfMLearner(object):
                             tf.expand_dims(curr_exp[:,:,:,1], -1))
                     else:
                         pixel_loss += tf.reduce_mean(curr_proj_error)
+
                     # Prepare images for tensorboard summaries
                     if i == 0:
                         proj_image_stack = curr_proj_image
@@ -112,14 +134,14 @@ class SfMLearner(object):
                 proj_error_stack_all.append(proj_error_stack)
                 if opt.explain_reg_weight > 0:
                     exp_mask_stack_all.append(exp_mask_stack)
-            total_loss = pixel_loss + smooth_loss + exp_loss
+            total_loss = pixel_loss + smooth_loss + exp_loss + normal_dot_prod_loss + normal_reg_loss
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]
             optim = tf.train.AdamOptimizer(opt.learning_rate, opt.beta1)
-            # self.grads_and_vars = optim.compute_gradients(total_loss,
-            #                                               var_list=train_vars)
-            # self.train_op = optim.apply_gradients(self.grads_and_vars)
+            #self.grads_and_vars = optim.compute_gradients(total_loss,
+                                                          #var_list=train_vars)
+            #self.train_op = optim.apply_gradients(self.grads_and_vars)
             self.train_op = slim.learning.create_train_op(total_loss, optim)
             self.global_step = tf.Variable(0,
                                            name='global_step',
@@ -135,6 +157,8 @@ class SfMLearner(object):
         self.pixel_loss = pixel_loss
         self.exp_loss = exp_loss
         self.smooth_loss = smooth_loss
+        self.normal_dot_prod_loss = normal_dot_prod_loss
+        self.normal_reg_loss = normal_reg_loss
         self.tgt_image_all = tgt_image_all
         self.src_image_stack_all = src_image_stack_all
         self.proj_image_stack_all = proj_image_stack_all
@@ -192,8 +216,6 @@ class SfMLearner(object):
         depth_map = tf.squeeze(pred_disp) # squeeze to [batch, H, W]
         mask = tf.greater(depth_map, tf.zeros_like(depth_map)) # mask indicating nonzero depth values
         mask = tf.cast(mask, tf.float32)
-        print(pred_disp)
-        print(depth_map)
 
         # convert inverse depth to depth by assigning `eps` to every pixel with 0 inverse depth
         # then inversing the inverse depth map
@@ -245,7 +267,6 @@ class SfMLearner(object):
         diff_x1y1_pad = tf.pad(diff_x1y1, [[0, 0], [nei, nei], [nei, nei], [0,0]] ,"CONSTANT")
         diff_pad = tf.stack([diff_x0_pad, diff_y0_pad, diff_x1_pad, diff_y1_pad,
                              diff_x0y0_pad, diff_x0y1_pad, diff_x1y0_pad, diff_x1y1_pad], axis=0) # [8, batch, H, W, 3]
-        print('diff_pad.shape', diff_pad.get_shape().as_list())
 
         # generate weights for 8-neighbor vectors
         img_ctr = img[:, nei:-nei, nei:-nei, :]
@@ -277,15 +298,14 @@ class SfMLearner(object):
         w_x1y1 = tf.exp(-alpha * tf.reduce_mean(tf.abs(grad_x1y1_pad), axis=3))
 
         w = tf.stack([w_x0, w_y0, w_x1, w_y1, w_x0y0, w_x0y1, w_x1y0, w_x1y1], axis=0) # [8, batch, H, W]
-        print('w.shape: ', w.get_shape().as_list())
         w = w / tf.reduce_sum(w, axis=0) # normalize weights for each pixel, so they sum to 1
 
         # calculate loss by dot product
         loss = 0
         for v in range(8):
             element_wise_prod = tf.multiply(diff_pad[v, :, :, :, :], pred_norm[:, :, :, :]) # [batch, H, W, 3]
-            dot_prod = tf.reduce_sum(element_wise_prod, axis=3)
-            loss += tf.reduce_sum(tf.multiply(w[v, :, :, :], dot_prod), axis=[1, 2])
+            dot_prod_sqr = tf.reduce_sum(element_wise_prod, axis=3) ** 2
+            loss += tf.reduce_sum(tf.multiply(w[v, :, :, :], dot_prod_sqr), axis=[1, 2])
 
         return loss
 
@@ -309,6 +329,8 @@ class SfMLearner(object):
         tf.summary.scalar("pixel_loss", self.pixel_loss)
         tf.summary.scalar("smooth_loss", self.smooth_loss)
         tf.summary.scalar("exp_loss", self.exp_loss)
+        tf.summary.scalar('normal_dot_prod_loss', self.normal_dot_prod_loss)
+        tf.summary.scalar('normal_reg_loss', self.normal_reg_loss)
         for s in range(opt.num_scales):
             tf.summary.histogram("scale%d_depth" % s, self.pred_depth[s])
             tf.summary.image('scale%d_disparity_image' % s, 1./self.pred_depth[s])
@@ -332,10 +354,10 @@ class SfMLearner(object):
         tf.summary.histogram("rx", self.pred_poses[:,:,3])
         tf.summary.histogram("ry", self.pred_poses[:,:,4])
         tf.summary.histogram("rz", self.pred_poses[:,:,5])
-        # for var in tf.trainable_variables():
-        #     tf.summary.histogram(var.op.name + "/values", var)
-        # for grad, var in self.grads_and_vars:
-        #     tf.summary.histogram(var.op.name + "/gradients", grad)
+        #for var in tf.trainable_variables():
+            #tf.summary.histogram(var.op.name + "/values", var)
+            #for grad, var in self.grads_and_vars:
+                #tf.summary.histogram(var.op.name + "/gradients", grad)
 
     def train(self, opt):
         #opt.num_source = opt.seq_length - 1
@@ -368,7 +390,7 @@ class SfMLearner(object):
                 print("Resume training from previous checkpoint: %s" % checkpoint)
                 self.saver.restore(sess, checkpoint)
             start_time = time.time()
-            for step in range(1, opt.max_steps):
+            for step in range(opt.max_steps):
                 fetches = {
                     "train": self.train_op,
                     "global_step": self.global_step,

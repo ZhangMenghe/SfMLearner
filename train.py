@@ -13,7 +13,7 @@ flags.DEFINE_string("init_checkpoint_file", None, "Specific checkpoint file to i
 flags.DEFINE_float("learning_rate", 0.0002, "Learning rate of for adam")
 flags.DEFINE_float("beta1", 0.9, "Momentum term of adam")
 flags.DEFINE_float("smooth_weight", 0.5, "Weight for smoothness")
-flags.DEFINE_float("explain_reg_weight", 0.0, "Weight for explanability regularization")
+flags.DEFINE_float("explain_reg_weight", 0.2, "Weight for explanability regularization")
 flags.DEFINE_integer("batch_size", 4, "The size of of a sample batch")
 flags.DEFINE_integer("img_height", 128, "Image height")
 flags.DEFINE_integer("img_width", 416, "Image width")
@@ -27,7 +27,7 @@ flags.DEFINE_boolean("continue_train", False, "Continue training from previous c
 ## added
 flags.DEFINE_integer("num_source", 2, "Number of source images")
 flags.DEFINE_integer("num_scales", 4, "Number of multi-scale outputs")
-flags.DEFINE_float("normal_depth_constraint_weight", 0.2, "Weight for penalizing dot product of normals and depth")
+flags.DEFINE_float("normal_depth_constraint_weight", 0.001, "Weight for penalizing dot product of normals and depth")
 flags.DEFINE_float("normal_reg_weight", 0.1, "Weight for enforcing normal to have norm 1")
 
 FLAGS = flags.FLAGS

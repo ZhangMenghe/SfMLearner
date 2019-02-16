@@ -4,12 +4,12 @@ import random
 import tensorflow as tf
 
 class DataLoader(object):
-    def __init__(self, 
-                 dataset_dir=None, 
-                 batch_size=None, 
-                 img_height=None, 
-                 img_width=None, 
-                 num_source=None, 
+    def __init__(self,
+                 dataset_dir=None,
+                 batch_size=None,
+                 img_height=None,
+                 img_width=None,
+                 num_source=None,
                  num_scales=None):
         self.dataset_dir = dataset_dir
         self.batch_size = batch_size
@@ -25,12 +25,12 @@ class DataLoader(object):
         # Load the list of training files into queues
         file_list = self.format_file_list(self.dataset_dir, 'train')
         image_paths_queue = tf.train.string_input_producer(
-            file_list['image_file_list'], 
-            seed=seed, 
+            file_list['image_file_list'],
+            seed=seed,
             shuffle=True)
         cam_paths_queue = tf.train.string_input_producer(
-            file_list['cam_file_list'], 
-            seed=seed, 
+            file_list['cam_file_list'],
+            seed=seed,
             shuffle=True)
         self.steps_per_epoch = int(
             len(file_list['image_file_list'])//self.batch_size)
@@ -49,14 +49,14 @@ class DataLoader(object):
         rec_def = []
         for i in range(9):
             rec_def.append([1.])
-        raw_cam_vec = tf.decode_csv(raw_cam_contents, 
+        raw_cam_vec = tf.decode_csv(raw_cam_contents,
                                     record_defaults=rec_def)
         raw_cam_vec = tf.stack(raw_cam_vec)
         intrinsics = tf.reshape(raw_cam_vec, [3, 3])
 
         # Form training batches
         src_image_stack, tgt_image, intrinsics = \
-                tf.train.batch([src_image_stack, tgt_image, intrinsics], 
+                tf.train.batch([src_image_stack, tgt_image, intrinsics],
                                batch_size=self.batch_size)
 
         # Data augmentation
@@ -121,9 +121,9 @@ class DataLoader(object):
             frames = f.readlines()
         subfolders = [x.split(' ')[0] for x in frames]
         frame_ids = [x.split(' ')[1][:-1] for x in frames]
-        image_file_list = [os.path.join(data_root, subfolders[i], 
+        image_file_list = [os.path.join(data_root, subfolders[i],
             frame_ids[i] + '.jpg') for i in range(len(frames))]
-        cam_file_list = [os.path.join(data_root, subfolders[i], 
+        cam_file_list = [os.path.join(data_root, subfolders[i],
             frame_ids[i] + '_cam.txt') for i in range(len(frames))]
         all_list = {}
         all_list['image_file_list'] = image_file_list
@@ -133,25 +133,25 @@ class DataLoader(object):
     def unpack_image_sequence(self, image_seq, img_height, img_width, num_source):
         # Assuming the center image is the target frame
         tgt_start_idx = int(img_width * (num_source//2))
-        tgt_image = tf.slice(image_seq, 
-                             [0, tgt_start_idx, 0], 
+        tgt_image = tf.slice(image_seq,
+                             [0, tgt_start_idx, 0],
                              [-1, img_width, -1])
         # Source frames before the target frame
-        src_image_1 = tf.slice(image_seq, 
-                               [0, 0, 0], 
+        src_image_1 = tf.slice(image_seq,
+                               [0, 0, 0],
                                [-1, int(img_width * (num_source//2)), -1])
         # Source frames after the target frame
-        src_image_2 = tf.slice(image_seq, 
-                               [0, int(tgt_start_idx + img_width), 0], 
+        src_image_2 = tf.slice(image_seq,
+                               [0, int(tgt_start_idx + img_width), 0],
                                [-1, int(img_width * (num_source//2)), -1])
         src_image_seq = tf.concat([src_image_1, src_image_2], axis=1)
         # Stack source frames along the color channels (i.e. [H, W, N*3])
-        src_image_stack = tf.concat([tf.slice(src_image_seq, 
-                                    [0, i*img_width, 0], 
-                                    [-1, img_width, -1]) 
+        src_image_stack = tf.concat([tf.slice(src_image_seq,
+                                    [0, i*img_width, 0],
+                                    [-1, img_width, -1])
                                     for i in range(num_source)], axis=2)
-        src_image_stack.set_shape([img_height, 
-                                   img_width, 
+        src_image_stack.set_shape([img_height,
+                                   img_width,
                                    num_source * 3])
         tgt_image.set_shape([img_height, img_width, 3])
         return tgt_image, src_image_stack
@@ -159,22 +159,22 @@ class DataLoader(object):
     def batch_unpack_image_sequence(self, image_seq, img_height, img_width, num_source):
         # Assuming the center image is the target frame
         tgt_start_idx = int(img_width * (num_source//2))
-        tgt_image = tf.slice(image_seq, 
-                             [0, 0, tgt_start_idx, 0], 
+        tgt_image = tf.slice(image_seq,
+                             [0, 0, tgt_start_idx, 0],
                              [-1, -1, img_width, -1])
         # Source frames before the target frame
-        src_image_1 = tf.slice(image_seq, 
-                               [0, 0, 0, 0], 
+        src_image_1 = tf.slice(image_seq,
+                               [0, 0, 0, 0],
                                [-1, -1, int(img_width * (num_source//2)), -1])
         # Source frames after the target frame
-        src_image_2 = tf.slice(image_seq, 
-                               [0, 0, int(tgt_start_idx + img_width), 0], 
+        src_image_2 = tf.slice(image_seq,
+                               [0, 0, int(tgt_start_idx + img_width), 0],
                                [-1, -1, int(img_width * (num_source//2)), -1])
         src_image_seq = tf.concat([src_image_1, src_image_2], axis=2)
         # Stack source frames along the color channels (i.e. [B, H, W, N*3])
-        src_image_stack = tf.concat([tf.slice(src_image_seq, 
-                                    [0, 0, i*img_width, 0], 
-                                    [-1, -1, img_width, -1]) 
+        src_image_stack = tf.concat([tf.slice(src_image_seq,
+                                    [0, 0, i*img_width, 0],
+                                    [-1, -1, img_width, -1])
                                     for i in range(num_source)], axis=3)
         return tgt_image, src_image_stack
 
