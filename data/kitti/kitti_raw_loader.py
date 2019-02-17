@@ -7,9 +7,9 @@ import tensorflow as tf
 class SegmentHelper(object):
     def __init__(self, graph_path="/home/menghe/Github/SfMLearner/kitti-deeplab/model/frozen_inference_graph.pb", img_height=128, img_width=416):
         self.graph = self.load_graph(graph_path)
+        self.sess = tf.InteractiveSession(graph = self.graph)
         self.image_input = self.graph.get_tensor_by_name('prefix/ImageTensor:0')
         self.softmax = self.graph.get_tensor_by_name('prefix/SemanticPredictions:0')
-        # self.sess = tf.Session(graph = self.graph)
         self.img_height = img_height
         self.img_width = img_width
     
@@ -26,11 +26,10 @@ class SegmentHelper(object):
 
     def apply(self, img):
         img = np.expand_dims(img, axis=0)
-        with tf.Session(graph=self.graph) as sess:
-            # print(self.sess.graph)
-            probs = sess.run(self.softmax, {self.image_input: img})
-            segmented_img = tf.squeeze(probs).eval()
-            aft_resize = scipy.misc.imresize(segmented_img,(self.img_height, self.img_width,3))
+        # with tf.Session(graph=self.graph) as sess:
+        probs = self.sess.run(self.softmax, {self.image_input: img})
+        segmented_img = tf.squeeze(probs).eval(session=self.sess)
+        aft_resize = scipy.misc.imresize(segmented_img,(self.img_height, self.img_width,3))
         return aft_resize
 
 class kitti_raw_loader(object):
