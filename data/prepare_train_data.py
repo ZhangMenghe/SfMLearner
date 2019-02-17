@@ -5,6 +5,8 @@ import numpy as np
 from glob import glob
 from joblib import Parallel, delayed
 import os
+os.environ['TF_CPP_MIN_LOG_LEVLE'] = '2'
+# from kitti.SegmentHelper import SegmentHelper
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset_dir", type=str, required=True, help="where the dataset is stored")
@@ -14,6 +16,7 @@ parser.add_argument("--seq_length", type=int, required=True, help="Length of eac
 parser.add_argument("--img_height", type=int, default=128, help="image height")
 parser.add_argument("--img_width", type=int, default=416, help="image width")
 parser.add_argument("--num_threads", type=int, default=4, help="number of threads to use")
+parser.add_argument("--date_spe", type=str, default="", help="date specifiy")
 args = parser.parse_args()
 
 def concat_image_seq(seq):
@@ -49,6 +52,9 @@ def dump_example(n, args):
     dump_cam_file = dump_dir + '/%s_cam.txt' % example['file_name']
     with open(dump_cam_file, 'w') as f:
         f.write('%f,0.,%f,0.,%f,%f,0.,0.,1.' % (fx, cx, fy, cy))
+    if 'segmentation' in example:
+        segmentation_file = dump_dir + example['file_name']+'-seg.png' 
+        scipy.misc.imsave(segmentation_file, example['segmentation'].astype(np.uint8))
 
 def main():
     if not os.path.exists(args.dump_root):
@@ -68,7 +74,8 @@ def main():
                                        split='eigen',
                                        img_height=args.img_height,
                                        img_width=args.img_width,
-                                       seq_length=args.seq_length)
+                                       seq_length=args.seq_length,
+                                       date_spe=args.date_spe)
 
     if args.dataset_name == 'kitti_raw_stereo':
         from kitti.kitti_raw_loader import kitti_raw_loader
@@ -104,4 +111,3 @@ def main():
                         tf.write('%s %s\n' % (s, frame))
 
 main()
-

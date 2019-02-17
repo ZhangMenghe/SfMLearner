@@ -3,6 +3,35 @@ import numpy as np
 from glob import glob
 import os
 import scipy.misc
+import tensorflow as tf
+class SegmentHelper(object):
+    def __init__(self, graph_path="/home/menghe/Github/SfMLearner/kitti-deeplab/model/frozen_inference_graph.pb", img_height=128, img_width=416):
+        self.graph = self.load_graph(graph_path)
+        self.image_input = self.graph.get_tensor_by_name('prefix/ImageTensor:0')
+        self.softmax = self.graph.get_tensor_by_name('prefix/SemanticPredictions:0')
+        # self.sess = tf.Session(graph = self.graph)
+        self.img_height = img_height
+        self.img_width = img_width
+    
+    def load_graph(self, frozen_graph_filename):
+        # We load the protobuf file from the disk and parse it to retrieve the 
+        # unserialized graph_def
+        with tf.gfile.GFile(frozen_graph_filename, "rb") as f:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
+
+        with tf.Graph().as_default() as graph:
+            tf.import_graph_def(graph_def, name="prefix")
+        return graph
+
+    def apply(self, img):
+        img = np.expand_dims(img, axis=0)
+        with tf.Session(graph=self.graph) as sess:
+            # print(self.sess.graph)
+            probs = sess.run(self.softmax, {self.image_input: img})
+            segmented_img = tf.squeeze(probs).eval()
+            aft_resize = scipy.misc.imresize(segmented_img,(self.img_height, self.img_width,3))
+        return aft_resize
 
 class kitti_raw_loader(object):
     def __init__(self, 
@@ -10,7 +39,8 @@ class kitti_raw_loader(object):
                  split,
                  img_height=256,
                  img_width=256,
-                 seq_length=5):
+                 seq_length=5,
+                 date_spe='2011_09_26'):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         static_frames_file = dir_path + '/static_frames.txt'
         test_scene_file = dir_path + '/test_scenes_' + split + '.txt'
@@ -22,8 +52,10 @@ class kitti_raw_loader(object):
         self.img_width = img_width
         self.seq_length = seq_length
         self.cam_ids = ['02', '03']
-        self.date_list = ['2011_09_26', '2011_09_28', '2011_09_29', 
-                          '2011_09_30', '2011_10_03']
+        # self.date_list = ['2011_09_26', '2011_09_28', '2011_09_29', 
+        #                   '2011_09_30', '2011_10_03']
+        self.date_list = [date_spe]
+        self.seg_loader = SegmentHelper()
         self.collect_static_frames(static_frames_file)
         self.collect_train_frames()
     def collect_static_frames(self, static_frames_file):
@@ -88,6 +120,7 @@ class kitti_raw_loader(object):
     def load_image_sequence(self, frames, tgt_idx, seq_length):
         half_offset = int((seq_length - 1)/2)
         image_seq = []
+        segmentation=None
         for o in range(-half_offset, half_offset + 1):
             curr_idx = tgt_idx + o
             curr_drive, curr_cid, curr_frame_id = frames[curr_idx].split(' ')
@@ -95,12 +128,14 @@ class kitti_raw_loader(object):
             if o == 0:
                 zoom_y = self.img_height/curr_img.shape[0]
                 zoom_x = self.img_width/curr_img.shape[1]
+                # get semantic segmentation here
+                segmentation = self.seg_loader.apply(curr_img)
             curr_img = scipy.misc.imresize(curr_img, (self.img_height, self.img_width))
             image_seq.append(curr_img)
-        return image_seq, zoom_x, zoom_y
+        return image_seq,segmentation, zoom_x, zoom_y
 
     def load_example(self, frames, tgt_idx):
-        image_seq, zoom_x, zoom_y = self.load_image_sequence(frames, tgt_idx, self.seq_length)
+        image_seq,segmentation, zoom_x, zoom_y = self.load_image_sequence(frames, tgt_idx, self.seq_length)
         tgt_drive, tgt_cid, tgt_frame_id = frames[tgt_idx].split(' ')
         intrinsics = self.load_intrinsics_raw(tgt_drive, tgt_cid, tgt_frame_id)
         intrinsics = self.scale_intrinsics(intrinsics, zoom_x, zoom_y)
@@ -109,6 +144,7 @@ class kitti_raw_loader(object):
         example['image_seq'] = image_seq
         example['folder_name'] = tgt_drive + '_' + tgt_cid + '/'
         example['file_name'] = tgt_frame_id
+        example['segmentation'] = segmentation
         return example
 
     def load_image_raw(self, drive, cid, frame_id):

@@ -1,4 +1,6 @@
 __pycache__/
 *checkpoint*
 model-*
+model/*
 .ipynb_checkpoints
+*.pb

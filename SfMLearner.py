@@ -286,10 +286,10 @@ class SfMLearner(object):
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         with sv.managed_session(config=config) as sess:
-            print('Trainable variables: ')
-            for var in tf.trainable_variables():
-                print(var.name)
-            print("parameter_count =", sess.run(parameter_count))
+            # print('Trainable variables: ')
+            # for var in tf.trainable_variables():
+            #     print(var.name)
+            # print("parameter_count =", sess.run(parameter_count))
             if opt.continue_train:
                 if opt.init_checkpoint_file is None:
                     checkpoint = tf.train.latest_checkpoint(opt.checkpoint_dir)

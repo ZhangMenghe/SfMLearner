@@ -37,8 +37,8 @@ def main(_):
     np.random.seed(seed)
     random.seed(seed)
 
-    pp = pprint.PrettyPrinter()
-    pp.pprint(flags.FLAGS.__flags)
+    # pp = pprint.PrettyPrinter()
+    # pp.pprint(flags.FLAGS.__flags)
 
     if not os.path.exists(FLAGS.checkpoint_dir):
         os.makedirs(FLAGS.checkpoint_dir)
