@@ -27,9 +27,5 @@ class segmentation_util(object):
             img = np.expand_dims(img, axis = 0)
             probs = self.sess.run(self.seg_output, {self.img_input: img})
             img = np.squeeze(probs)
-            mask = scipy.misc.imresize((img == 255).astype(int), (self.img_height, self.img_width), interp = "nearest")
-            for i in range(19):
-                m = (img == i).astype(int)
-                m = scipy.misc.imresize(m, (self.img_height, self.img_width), interp = "nearest")
-                mask = np.dstack((mask, m))
+            mask = scipy.misc.imresize(img, (self.img_height, self.img_width), interp = "nearest")
         return mask

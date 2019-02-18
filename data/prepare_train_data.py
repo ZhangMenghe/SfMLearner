@@ -32,6 +32,7 @@ def dump_example(n, args):
     if example == False:
         return
     image_seq = concat_image_seq(example['image_seq'])
+    mask_seq = concat_image_seq(example['mask_seq'])
     intrinsics = example['intrinsics']
     fx = intrinsics[0, 0]
     fy = intrinsics[1, 1]
@@ -45,8 +46,10 @@ def dump_example(n, args):
     except OSError:
         if not os.path.isdir(dump_dir):
             raise
-    dump_img_file = dump_dir + '/%s' % example['file_name']
-    np.save(dump_img_file, image_seq.astype(np.uint8))
+    dump_img_file = dump_dir + '/%s.jpg' % example['file_name']
+    dump_mask_file = dump_dir + '/%s_seg.jpg' % example['file_name']
+    scipy.misc.imsave(dump_img_file, image_seq.astype(np.uint8))
+    scipy.misc.imsave(dump_mask_file, mask_seq.astype(np.uint8))
     dump_cam_file = dump_dir + '/%s_cam.txt' % example['file_name']
     with open(dump_cam_file, 'w') as f:
         f.write('%f,0.,%f,0.,%f,%f,0.,0.,1.' % (fx, cx, fy, cy))
