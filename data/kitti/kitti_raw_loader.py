@@ -25,12 +25,13 @@ class kitti_raw_loader(object):
         self.img_width = img_width
         self.seq_length = seq_length
         self.cam_ids = ['02', '03']
-        self.date_list = ['2011_09_26', '2011_09_28', '2011_09_29', 
-                          '2011_09_30', '2011_10_03']
+        #self.date_list = ['2011_09_26', '2011_09_28', '2011_09_29', 
+        #                  '2011_09_30', '2011_10_03']
+        self.date_list = ['2011_09_26']
         self.collect_static_frames(static_frames_file)
         self.collect_train_frames()
         ## load segmentation model
-        self.seg_model = seg.segmentation_util(seg_model_dir)
+        self.seg_model = seg.segmentation_util(seg_model_dir,  self.img_height, self.img_width)
     def collect_static_frames(self, static_frames_file):
         with open(static_frames_file, 'r') as f:
             frames = f.readlines()
@@ -100,7 +101,7 @@ class kitti_raw_loader(object):
             if o == 0:
                 zoom_y = self.img_height/curr_img.shape[0]
                 zoom_x = self.img_width/curr_img.shape[1]
-            mask = self.seg_model.inference(scipy.misc.imresize(curr_img, (303, 1002)), self.img_height, self.img_width)
+            mask = self.seg_model.inference(curr_img)
             curr_img = scipy.misc.imresize(curr_img, (self.img_height, self.img_width))
             image_seq.append(np.dstack((curr_img, mask)))
         return image_seq, zoom_x, zoom_y

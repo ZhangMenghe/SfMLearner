@@ -4,7 +4,7 @@ import numpy as np
 import scipy.misc
 
 class segmentation_util(object):
-    def __init__(self, seg_model_dir):
+    def __init__(self, seg_model_dir, img_height, img_width):
         # We load the protobuf file from the disk and parse it to retrieve the 
         # unserialized graph_def
         with tf.gfile.GFile(seg_model_dir, "rb") as f:
@@ -17,15 +17,19 @@ class segmentation_util(object):
 
         self.img_input = self.graph.get_tensor_by_name('prefix/ImageTensor:0')
         self.seg_output = self.graph.get_tensor_by_name('prefix/SemanticPredictions:0')
+        self.sess = tf.Session(graph = self.graph)
+        self.img_height = img_height
+        self.img_width = img_width
 
-    def inference(self, img, img_height, img_weight):
-        with tf.Session(graph=self.graph) as sess:
+    def inference(self, img):
+        #with tf.Session(graph=self.graph) as sess:
+        with tf.device('/device:GPU:0'):
             img = np.expand_dims(img, axis = 0)
-            probs = sess.run(self.seg_output, {self.img_input: img})
-            img = tf.squeeze(probs).eval()
-            mask = scipy.misc.imresize((img == 255).astype(int), (img_height, img_weight), interp = "nearest")
+            probs = self.sess.run(self.seg_output, {self.img_input: img})
+            img = np.squeeze(probs)
+            mask = scipy.misc.imresize((img == 255).astype(int), (self.img_height, self.img_width), interp = "nearest")
             for i in range(19):
                 m = (img == i).astype(int)
-                m = scipy.misc.imresize(m, (img_height, img_weight), interp = "nearest")
+                m = scipy.misc.imresize(m, (self.img_height, self.img_width), interp = "nearest")
                 mask = np.dstack((mask, m))
         return mask
