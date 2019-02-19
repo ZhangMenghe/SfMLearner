@@ -27,8 +27,9 @@ v_img_width=416
 v_img_height=128
 v_num_threads=1
 
-
+debug_start_id=9439
 for i in ${v_date_list[@]}; do
+	# while true; do
 	# calib_zip_name=$i'_calib.zip'
 	# echo "Downloading: "$calib_zip_name
 	# wget 'https://s3.eu-central-1.amazonaws.com/avg-kitti/raw_data/'$calib_zip_name -P $v_raw_data_set_path
@@ -57,10 +58,7 @@ for i in ${v_date_list[@]}; do
 	#         unzip -o $v_raw_data_set_path$shortname -d $v_raw_data_set_path
 	#         rm $v_raw_data_set_path$shortname
 	# 	done
- 	python data/prepare_train_data.py --dataset_dir=$v_raw_data_set_path --dataset_name=$v_dataset_name --dump_root=$v_dump_root --date_spe=$i --seq_length=$v_seq_length --img_width=$v_img_width --img_height=$v_img_height --num_threads=$v_num_threads
- 	# if [[ $? != 0 ]];
- 	# then
- 	# 	break
- 	# fi
+ 	python -W ignore data/prepare_train_data.py --dataset_dir=$v_raw_data_set_path --dataset_name=$v_dataset_name --dump_root=$v_dump_root --date_spe=$i --seq_length=$v_seq_length --img_width=$v_img_width --img_height=$v_img_height --num_threads=$v_num_threads --start_id=$debug_start_id
  	# rm -r $v_raw_data_set_path$i
+ # done
 done

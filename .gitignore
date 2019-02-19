@@ -4,3 +4,4 @@ model-*
 model/*
 .ipynb_checkpoints
 *.pb
+*.pyc
