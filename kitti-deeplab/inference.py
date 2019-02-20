@@ -2,18 +2,13 @@ import os
 import sys
 import scipy
 import numpy as np
-import cv2
+import imageio
 import tensorflow as tf
-from helper import logits2image
+
+from cityscapelabels import trainId2RGB
+
 import os
 os.environ['TF_CPP_MIN_LOG_LEVLE'] = '2'
-
-flags = tf.app.flags
-flags.DEFINE_string("dataset_dir", "", "Dataset directory")
-flags.DEFINE_string("graph_dir", "", "Graph path")
-flags.DEFINE_integer("img_height", 128, "Image height")
-flags.DEFINE_integer("img_width", 416, "Image width")
-FLAGS = flags.FLAGS
 
 def load_graph(frozen_graph_filename):
     # We load the protobuf file from the disk and parse it to retrieve the 
@@ -26,8 +21,17 @@ def load_graph(frozen_graph_filename):
         tf.import_graph_def(graph_def, name="prefix")
     return graph
 
-graph = load_graph(FLAGS.graph_dir)
-image_dir = FLAGS.dataset_dir
+def logits2image(logits):
+    logits = logits.astype(np.uint8)
+    image = np.empty([logits.shape[0],logits.shape[1],3],dtype=float)
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            image[i,j,:] = trainId2RGB[logits[i,j]]
+    image = image.astype(np.uint8)
+    return image
+
+graph = load_graph("model/frozen_inference_graph.pb")#load_graph(sys.argv[1])
+image_dir = "sample-images/"#sys.argv[2]
 
 # DeepLabv3+ input and output tensors
 image_input = graph.get_tensor_by_name('prefix/ImageTensor:0')
@@ -45,7 +49,7 @@ image_dir_segmented_colored = image_dir+'segmented_images_colored/'
 with tf.Session(graph=graph) as sess:
     for fname in sorted(os.listdir(image_dir)):
         if fname.endswith(".png"):
-            img = scipy.misc.imread(os.path.join(image_dir, fname)) 
+            img = imageio.imread(os.path.join(image_dir, fname)) 
             img = np.expand_dims(img, axis=0)
             probs = sess.run(softmax, {image_input: img})
             img = tf.squeeze(probs).eval()
@@ -53,6 +57,6 @@ with tf.Session(graph=graph) as sess:
             img_colored = logits2image(img)
             print(img_colored.shape)
             # print(os.path.join(image_dir_segmented+fname))
-            cv2.imwrite(os.path.join(image_dir_segmented+fname),img)
-            cv2.imwrite(os.path.join(image_dir_segmented_colored+fname),cv2.cvtColor(img_colored, cv2.COLOR_BGR2RGB))   
+            imageio.imwrite(os.path.join(image_dir_segmented+fname), img.astype(np.uint8))
+            imageio.imwrite(os.path.join(image_dir_segmented_colored+fname), img_colored.astype(np.uint8))  
             # print(fname)
