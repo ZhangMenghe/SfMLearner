@@ -42,11 +42,17 @@ class DataLoader(object):
         with tf.Session() as sess:
             # Load images
             sess.run(img_iterator.initializer)
-            image_contents = tf.read_file(sess.run(img_element))
+            jpg_file_name = sess.run(img_element)
+            image_contents = tf.read_file(jpg_file_name)
             image_seq = tf.image.decode_jpeg(image_contents)
             tgt_image, src_image_stack = self.unpack_image_sequence(\
                                         image_seq, self.img_height,\
                                          self.img_width, self.num_source)
+            #if(load_semantic):
+            png_file_name = jpg_file_name[:-4]+"-seg.png"
+            seg_contents = tf.read_file(png_file_name)
+            seg_image = tf.image.decode_png(seg_contents, channels=1)
+            seg_image.set_shape([self.img_height, self.img_width, 1])
 
             # Load camera intrinsics
             sess.run(cam_iterator.initializer)
@@ -68,8 +74,8 @@ class DataLoader(object):
         # src_image_stack = image_all[:, :, :, 3:]
 
         # Form training batches
-        src_image_stack, tgt_image, proj_cam2pix, proj_pix2cam = \
-                tf.train.batch([src_image_stack, tgt_image, proj_cam2pix, proj_pix2cam], 
+        src_image_stack, tgt_image, seg_image, proj_cam2pix, proj_pix2cam = \
+                tf.train.batch([src_image_stack, tgt_image, seg_image, proj_cam2pix, proj_pix2cam], 
                                batch_size=self.batch_size)
 
         return tgt_image, seg_image, src_image_stack, proj_cam2pix, proj_pix2cam
