@@ -18,45 +18,48 @@ class DataLoader(object):
         self.img_width = img_width
         self.num_source = num_source
         self.num_scales = num_scales
-
-    def load_train_batch(self):
-        """Load a batch of training instances.
-        """
+    
+    """Load a batch of training instances.
+    """
+    def load_train_batch(self, load_semantic = False):
         seed = random.randint(0, 2**31 - 1)
+
         # Load the list of training files into queues
         file_list = self.format_file_list(self.dataset_dir, 'train')
-        image_paths_queue = tf.train.string_input_producer(
-            file_list['image_file_list'], 
-            seed=seed, 
-            shuffle=True)
-        cam_paths_queue = tf.train.string_input_producer(
-            file_list['cam_file_list'], 
-            seed=seed, 
-            shuffle=True)
-        self.steps_per_epoch = int(
-            len(file_list['image_file_list'])//self.batch_size)
+        image_path_strs = tf.data.Dataset.from_tensor_slices(file_list['image_file_list'])\
+                          .shuffle(len(file_list['image_file_list']), seed = seed)
+        cam_path_strs = tf.data.Dataset.from_tensor_slices(file_list['cam_file_list'])\
+                        .shuffle(len(file_list['cam_file_list']), seed = seed)
+        self.steps_per_epoch = int(len(file_list['image_file_list'])//self.batch_size)
 
-        # Load images
-        img_reader = tf.WholeFileReader()
-        _, image_contents = img_reader.read(image_paths_queue)
-        image_seq = tf.image.decode_jpeg(image_contents)
-        tgt_image, src_image_stack = \
-            self.unpack_image_sequence(
-                image_seq, self.img_height, self.img_width, self.num_source)
+        seg_image = None
+        img_iterator = image_path_strs.make_initializable_iterator()
+        img_element = img_iterator.get_next()
 
-        # Load camera intrinsics
-        cam_reader = tf.TextLineReader()
-        _, raw_cam_contents = cam_reader.read(cam_paths_queue)
-        rec_def = []
-        for i in range(9):
-            rec_def.append([1.])
-        raw_cam_vec = tf.decode_csv(raw_cam_contents, 
-                                    record_defaults=rec_def)
-        raw_cam_vec = tf.stack(raw_cam_vec)
-        intrinsics = tf.reshape(raw_cam_vec, [3, 3])
+        cam_iterator = cam_path_strs.make_initializable_iterator()
+        cam_element = cam_iterator.get_next()
 
-        proj_cam2pix, proj_pix2cam = self.get_multi_scale_intrinsics(
-            intrinsics, self.num_scales)
+        with tf.Session() as sess:
+            # Load images
+            sess.run(img_iterator.initializer)
+            image_contents = tf.read_file(sess.run(img_element))
+            image_seq = tf.image.decode_jpeg(image_contents)
+            tgt_image, src_image_stack = self.unpack_image_sequence(\
+                                        image_seq, self.img_height,\
+                                         self.img_width, self.num_source)
+
+            # Load camera intrinsics
+            sess.run(cam_iterator.initializer)
+            cam_contents = tf.read_file(sess.run(cam_element))
+            rec_def = []
+            for i in range(9):
+                rec_def.append([1.])
+            raw_cam_vec = tf.stack(tf.decode_csv(cam_contents, record_defaults=rec_def))
+            intrinsics = tf.reshape(raw_cam_vec, [3, 3])
+            proj_cam2pix, proj_pix2cam = self.get_multi_scale_intrinsics(intrinsics, self.num_scales)
+        
+
+
         # TODO: Data augmentation
         # image_all = tf.concat([tgt_image, src_image_stack], axis=3)
         # image_all, intrinsics = self.data_augmentation(
@@ -69,7 +72,7 @@ class DataLoader(object):
                 tf.train.batch([src_image_stack, tgt_image, proj_cam2pix, proj_pix2cam], 
                                batch_size=self.batch_size)
 
-        return tgt_image, src_image_stack, proj_cam2pix, proj_pix2cam
+        return tgt_image, seg_image, src_image_stack, proj_cam2pix, proj_pix2cam
     def load_semantic_image(self):
         semantic_image = np.zeros([self.img_height, self.img_width, 3])
         return semantic_image

@@ -31,7 +31,7 @@ class SfMLearner(object):
             # tgt_image[batch;img_height, img_width, 3]
             # src_image[batch;img_height,img_width, num_source * 3]
             # proj_cam2pix, proj_pix2cam [batch; 3; 3] 
-            tgt_image, src_image_stack, proj_cam2pix, proj_pix2cam = loader.load_train_batch()
+            tgt_image, seg_img, src_image_stack, proj_cam2pix, proj_pix2cam = loader.load_train_batch(load_semantic = True)
             tgt_image = self.preprocess_image(tgt_image)
             src_image_stack = self.preprocess_image(src_image_stack)
 
