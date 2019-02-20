@@ -17,6 +17,7 @@ class segmentation_util(object):
 
         self.img_input = self.graph.get_tensor_by_name('prefix/ImageTensor:0')
         self.seg_output = self.graph.get_tensor_by_name('prefix/SemanticPredictions:0')
+        self.seg_img_tensor = tf.squeeze(self.seg_output)
         self.sess = tf.Session(graph = self.graph)
         self.img_height = img_height
         self.img_width = img_width
@@ -25,7 +26,6 @@ class segmentation_util(object):
         #with tf.Session(graph=self.graph) as sess:
         with tf.device('/device:GPU:0'):
             img = np.expand_dims(img, axis = 0)
-            probs = self.sess.run(self.seg_output, {self.img_input: img})
-            img = np.squeeze(probs)
-            mask = scipy.misc.imresize(img, (self.img_height, self.img_width), interp = "nearest")
+            probs = self.sess.run(self.seg_img_tensor, {self.img_input: img})
+            mask = scipy.misc.imresize(probs, (self.img_height, self.img_width), interp = "nearest", mode = 'F')
         return mask

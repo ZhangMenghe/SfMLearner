@@ -46,8 +46,8 @@ def dump_example(n, args):
     except OSError:
         if not os.path.isdir(dump_dir):
             raise
-    dump_img_file = dump_dir + '/%s.jpg' % example['file_name']
-    dump_mask_file = dump_dir + '/%s_seg.jpg' % example['file_name']
+    dump_img_file = dump_dir + '/%s.png' % example['file_name']
+    dump_mask_file = dump_dir + '/%s_seg.png' % example['file_name']
     scipy.misc.imsave(dump_img_file, image_seq.astype(np.uint8))
     scipy.misc.imsave(dump_mask_file, mask_seq.astype(np.uint8))
     dump_cam_file = dump_dir + '/%s_cam.txt' % example['file_name']
@@ -102,7 +102,7 @@ def main():
                 if not os.path.isdir(args.dump_root + '/%s' % s):
                     continue
                 imfiles = glob(os.path.join(args.dump_root, s, '*.jpg'))
-                frame_ids = [os.path.basename(fi).split('.')[0] for fi in imfiles]
+                frame_ids = [os.path.basename(fi).split('.')[0] for fi in imfiles if not fi.endswith('_seg.jpg')]
                 for frame in frame_ids:
                     if np.random.random() < 0.1:
                         vf.write('%s %s\n' % (s, frame))
