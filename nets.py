@@ -15,11 +15,11 @@ def resize_like(inputs, ref):
         return inputs
     return tf.image.resize_nearest_neighbor(inputs, [rH.value, rW.value])
 
-def pose_exp_net(tgt_image, src_image_stack, do_exp=True, is_training=True):
+def pose_exp_net(tgt_image, src_image_stack, num_source, do_exp=True, is_training=True):
     inputs = tf.concat([tgt_image, src_image_stack], axis=3)
     H = inputs.get_shape()[1].value
     W = inputs.get_shape()[2].value
-    num_source = int(src_image_stack.get_shape()[3].value//3)
+    #num_source = int(src_image_stack.get_shape()[3].value//(3)
     with tf.variable_scope('pose_exp_net') as sc:
         end_points_collection = sc.original_name_scope + '_end_points'
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
@@ -28,7 +28,7 @@ def pose_exp_net(tgt_image, src_image_stack, do_exp=True, is_training=True):
                             activation_fn=tf.nn.relu,
                             outputs_collections=end_points_collection):
             # cnv1 to cnv5b are shared between pose and explainability prediction
-            cnv1  = slim.conv2d(inputs,16,  [7, 7], stride=2, scope='cnv1')
+            cnv1  = slim.conv2d(inputs, 32,  [7, 7], stride=2, scope='cnv1')
             cnv2  = slim.conv2d(cnv1, 32,  [5, 5], stride=2, scope='cnv2')
             cnv3  = slim.conv2d(cnv2, 64,  [3, 3], stride=2, scope='cnv3')
             cnv4  = slim.conv2d(cnv3, 128, [3, 3], stride=2, scope='cnv4')
@@ -81,8 +81,8 @@ def disp_net(tgt_image, is_training=True):
                             weights_regularizer=slim.l2_regularizer(0.05),
                             activation_fn=tf.nn.relu,
                             outputs_collections=end_points_collection):
-            cnv1  = slim.conv2d(tgt_image, 32,  [7, 7], stride=2, scope='cnv1')
-            cnv1b = slim.conv2d(cnv1,  32,  [7, 7], stride=1, scope='cnv1b')
+            cnv1  = slim.conv2d(tgt_image, 64,  [7, 7], stride=2, scope='cnv1')
+            cnv1b = slim.conv2d(cnv1,  64,  [7, 7], stride=1, scope='cnv1b')
             cnv2  = slim.conv2d(cnv1b, 64,  [5, 5], stride=2, scope='cnv2')
             cnv2b = slim.conv2d(cnv2,  64,  [5, 5], stride=1, scope='cnv2b')
             cnv3  = slim.conv2d(cnv2b, 128, [3, 3], stride=2, scope='cnv3')

@@ -27,6 +27,9 @@ class DataLoader(object):
         seed = random.randint(0, 2**31 - 1)
         # Load the list of training files into queues
         file_list = self.format_file_list(self.dataset_dir, 'train')
+
+        self.steps_per_epoch = int(
+	        len(file_list['image_file_list'])//self.batch_size)
         
         buffer_size = tf.shape(file_list['seg_file_list'], out_type=tf.int64)[0]
         dataset = tf.data.Dataset.from_tensor_slices(( 
@@ -171,6 +174,11 @@ class DataLoader(object):
             src_seg_stack.append(self.unpack_mask(seg_stack[:, :, :, i]))
         src_seg_stack = tf.concat(src_seg_stack, axis = 3)
         src_seg_stack = tf.squeeze(src_seg_stack)
+        src_seg_stack.set_shape([self.batch_size, 
+                                self.img_height, 
+                                self.img_width, 
+                                self.num_seg_class * self.num_source])
+        tgt_seg.set_shape([self.batch_size, self.img_height, self.img_width, self.num_seg_class])
         return tgt_seg, src_seg_stack
 
     def unpack_mask(self, img):

@@ -37,6 +37,7 @@ class SfMLearner(object):
             pred_poses, pred_exp_logits, pose_exp_net_endpoints = \
                 pose_exp_net(tgt_image,
                              src_image_stack, 
+                             opt.num_source,
                              do_exp=(opt.explain_reg_weight > 0),
                              is_training=True)
 
