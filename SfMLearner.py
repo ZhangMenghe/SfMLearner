@@ -20,9 +20,11 @@ class SfMLearner(object):
                             opt.img_height,
                             opt.img_width,
                             opt.num_source,
-                            opt.num_scales)
+                            opt.num_scales,
+                            opt.num_seg_class)
         with tf.name_scope("data_loading"):
             tgt_image, src_image_stack, intrinsics = loader.load_train_batch()
+            #### tgt_image = [3 * image, 20 * seg], src_image_stack = [3 * src_num, 20 * src_num]
             tgt_image = self.preprocess_image(tgt_image)
             src_image_stack = self.preprocess_image(src_image_stack)
 
@@ -39,6 +41,8 @@ class SfMLearner(object):
                              is_training=True)
 
         with tf.name_scope("compute_loss"):
+            tgt_seg, src_seg_stack = tgt_image[:, :, :, 3:], src_image_stack[:, :, :, opt.num_source * 3:]
+            tgt_image, src_image_stack = tgt_image[:, :, :, :3], src_image_stack[:, :, :, :opt.num_source * 3]
             pixel_loss = 0
             exp_loss = 0
             smooth_loss = 0
