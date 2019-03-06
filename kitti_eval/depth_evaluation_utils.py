@@ -6,6 +6,7 @@ import os
 import cv2
 from collections import Counter
 import pickle
+import sys
 
 def compute_errors(gt, pred):
     thresh = np.maximum((gt / pred), (pred / gt))
@@ -84,6 +85,8 @@ def read_file_data(files, data_root):
     cams = []
     num_probs = 0
     for filename in files:
+        if(len(filename) < 10):
+            continue
         filename = filename.split()[0]
         splits = filename.split('/')
 #         camera_id = filename[-1]   # 2 is left, 3 is right
@@ -137,7 +140,10 @@ def read_calib_file(path):
             if float_chars.issuperset(value):
                 # try to cast to float array
                 try:
-                    data[key] = np.array(map(float, value.split(' ')))
+                    if sys.version_info[0] < 3:
+                        data[key] = np.array(map(float, value.split(' ')))
+                    else:
+                        data[key] = np.array(list(map(float, value.split(' '))))
                 except ValueError:
                     # casting error: data[key] already eq. value, so pass
                     pass
@@ -172,6 +178,7 @@ def generate_depth_map(calib_dir, velo_file_name, im_shape, cam=2, interp=False,
     # load calibration files
     cam2cam = read_calib_file(calib_dir + 'calib_cam_to_cam.txt')
     velo2cam = read_calib_file(calib_dir + 'calib_velo_to_cam.txt')
+
     velo2cam = np.hstack((velo2cam['R'].reshape(3,3), velo2cam['T'][..., np.newaxis]))
     velo2cam = np.vstack((velo2cam, np.array([0, 0, 0, 1.0])))
 
@@ -207,7 +214,10 @@ def generate_depth_map(calib_dir, velo_file_name, im_shape, cam=2, interp=False,
 
     # find the duplicate points and choose the closest depth
     inds = sub2ind(depth.shape, velo_pts_im[:, 1], velo_pts_im[:, 0])
-    dupe_inds = [item for item, count in Counter(inds).iteritems() if count > 1]
+    if sys.version_info[0] < 3:
+        dupe_inds = [item for item, count in Counter(inds).iteritems() if count > 1]
+    else:
+        dupe_inds = [item for item, count in Counter(inds).items() if count > 1]
     for dd in dupe_inds:
         pts = np.where(inds==dd)[0]
         x_loc = int(velo_pts_im[pts[0], 0])

@@ -8,16 +8,11 @@ import tensorflow.contrib.slim as slim
 from data_loader import DataLoader
 from nets import *
 from utils import *
-from depth2normal_tf import *
-from normal2depth_tf import *
 
 class SfMLearner(object):
     def __init__(self):
         pass
-    def gradient(self, pred):
-        D_dy = pred[:, 1:, :, :] - pred[:, :-1, :, :]
-        D_dx = pred[:, :, 1:, :] - pred[:, :, :-1, :]
-        return D_dx, D_dy
+    
     def build_train_graph(self):
         opt = self.opt
         loader = DataLoader(opt.dataset_dir,
@@ -27,11 +22,7 @@ class SfMLearner(object):
                             opt.num_source,
                             opt.num_scales)
         with tf.name_scope("data_loading"):
-            # Load batch data
-            # tgt_image[batch;img_height, img_width, 3]
-            # src_image[batch;img_height,img_width, num_source * 3]
-            # proj_cam2pix, proj_pix2cam [batch; 3; 3] 
-            tgt_image, seg_img, src_image_stack, proj_cam2pix, proj_pix2cam = loader.load_train_batch(load_semantic = True)
+            tgt_image, src_image_stack, intrinsics = loader.load_train_batch()
             tgt_image = self.preprocess_image(tgt_image)
             src_image_stack = self.preprocess_image(src_image_stack)
 
@@ -46,90 +37,40 @@ class SfMLearner(object):
                              src_image_stack, 
                              do_exp=(opt.explain_reg_weight > 0),
                              is_training=True)
-        with tf.name_scope("semantic_loading"):
-            #TODO:check semantic info shape and decide what to do
-            semantic_image = loader.load_semantic_image()
 
         with tf.name_scope("compute_loss"):
-            # three loss from SfM learner
             pixel_loss = 0
             exp_loss = 0
             smooth_loss = 0
-
-            # more loss
-            normal_smooth_loss = 0
-            img_grad_loss = 0
-            edge_loss = 0 #TODO:edge awareness may come from semantic info
-
-            # save arrays from SfM
-            tgt_image_all = [] #target(multi-scale images)
-            src_image_stack_all = [] #source image
-            proj_image_stack_all = [] #Inverse warp the source image to the target image
+            tgt_image_all = []
+            src_image_stack_all = []
+            proj_image_stack_all = []
             proj_error_stack_all = []
-            exp_mask_stack_all = [] # Expalnibility mask
-
-            # Depth-Normal Constrains
-            pred_normals = []
-            pred_disp_from_norm_stack = []
-            flyout_map_all = []#TODO:what's this for??
-            edge_mask_all = [] #TODO:is this necessary?
-            depth_inverse = False
+            exp_mask_stack_all = []
             for s in range(opt.num_scales):
-                # Construct a reference explainability mask (i.e. all pixels are explainable)
                 if opt.explain_reg_weight > 0:
+                    # Construct a reference explainability mask (i.e. all 
+                    # pixels are explainable)
                     ref_exp_mask = self.get_reference_explain_mask(s)
-                
-                # Scale the source and target images for computing loss at the according scale.
+                # Scale the source and target images for computing loss at the 
+                # according scale.
                 curr_tgt_image = tf.image.resize_area(tgt_image, 
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])                
                 curr_src_image_stack = tf.image.resize_area(src_image_stack, 
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
 
-                # depth <-> normal constrain
-                ## depth2normal and normal2depth at each scale level
-                cam_mat = proj_cam2pix[:,s,:,:] #[batch;3;3]
-                # just extract fx, fy, cx, cy of each intrinsic[batch; 4]
-                intrinsic_params = tf.concat([tf.expand_dims(cam_mat[:,0,0],1),\
-                                              tf.expand_dims(cam_mat[:,1,1],1), \
-                                              tf.expand_dims(cam_mat[:,0,2],1), \
-                                              tf.expand_dims(cam_mat[:,1,2],1)], 1)
-                pred_depth_tensor = tf.squeeze(pred_depth[s])
-
-                pred_normal = depth2normal_layer_batch(pred_depth_tensor, intrinsic_params, depth_inverse)
-
-                pred_depth_from_normal = normal2depth_layer_batch(pred_depth_tensor, tf.squeeze(pred_normal), intrinsic_params, curr_tgt_image)
-                pred_depth_from_normal = tf.expand_dims(pred_depth_from_normal, -1)
-                pred_disp_from_normal = 1.0 / pred_depth_from_normal
-
-                pred_normals.append(pred_normal)
-                pred_disp_from_norm_stack.append(pred_disp_from_normal)
-
-
                 if opt.smooth_weight > 0:
                     smooth_loss += opt.smooth_weight/(2**s) * \
-                        self.compute_smooth_loss(pred_disp_from_norm_stack[s])
+                        self.compute_smooth_loss(pred_disp[s])
 
-                if opt.normal_smooth_weight > 0:
-                    normal_smooth_loss += tf.multiply(opt.normal_smooth_weight/(2**s), \
-                        # self.compute_edge_aware_smooth_loss(pred_normal[:,3:-3,3:-3,:], ))
-                        # self.compute_smooth_loss_wedge(pred_normal[:, 3:-3, 3:-3, :], pred_edges[s][:,3:-3,3:-3,], mode='l2', alpha=0.1))
-                        self.compute_smooth_loss(pred_normal[:, 3:-3, 3:-3, :]))
-
-                curr_tgt_image_grad_x, curr_tgt_image_grad_y = self.gradient(curr_tgt_image[:, :-2, 1:-1, :])
-                curr_src_image_grad_x, curr_src_image_grad_y = self.gradient(curr_src_image_stack[:, :-2, 1:-1 :])
-                
                 for i in range(opt.num_source):
                     # Inverse warp the source image to the target image frame
-                    # Use pred_depth and 8 pred_depth2 maps for inverse warping
                     curr_proj_image = projective_inverse_warp(
                         curr_src_image_stack[:,:,:,3*i:3*(i+1)], 
-                        pred_depth_from_normal, 
-                        pred_poses[:,i,:], # [batchsize, num_source, 6] 
-                        proj_cam2pix[:,s,:,:],# [batchsize, scale, 3, 3]
-                        proj_pix2cam[:,s,:,:],
-                        curr_tgt_image) 
+                        tf.squeeze(pred_depth[s], axis=3), 
+                        pred_poses[:,i,:], 
+                        intrinsics[:,s,:,:])
                     curr_proj_error = tf.abs(curr_proj_image - curr_tgt_image)
-
                     # Cross-entropy loss as regularization for the 
                     # explainability prediction
                     if opt.explain_reg_weight > 0:
@@ -140,27 +81,12 @@ class SfMLearner(object):
                             self.compute_exp_reg_loss(curr_exp_logits,
                                                       ref_exp_mask)
                         curr_exp = tf.nn.softmax(curr_exp_logits)
-
                     # Photo-consistency loss weighted by explainability
                     if opt.explain_reg_weight > 0:
                         pixel_loss += tf.reduce_mean(curr_proj_error * \
                             tf.expand_dims(curr_exp[:,:,:,1], -1))
                     else:
                         pixel_loss += tf.reduce_mean(curr_proj_error) 
-
-                    # Structure Similarity
-                    if opt.ssim_weight > 0:
-                        pixel_loss += opt.ssim_weight * tf.reduce_mean(SSIM(curr_proj_image, curr_tgt_image))
-                    
-                    # Gradient Loss
-                    if opt.img_grad_weight > 0:
-                        curr_proj_image_grad_x, curr_proj_image_grad_y = self.gradient(curr_proj_image[:, :-2, 1:-1, :])
-                        curr_proj_error_grad_x, curr_proj_error_grad_y = tf.abs(curr_tgt_image_grad_x-curr_proj_image_grad_x), \
-                                                                tf.abs(curr_tgt_image_grad_y-curr_proj_image_grad_y)
-
-                        img_grad_loss += opt.img_grad_weight * tf.reduce_mean(curr_proj_error_grad_x)
-                        img_grad_loss += opt.img_grad_weight * tf.reduce_mean(curr_proj_error_grad_y)
-
                     # Prepare images for tensorboard summaries
                     if i == 0:
                         proj_image_stack = curr_proj_image
@@ -181,7 +107,7 @@ class SfMLearner(object):
                 proj_error_stack_all.append(proj_error_stack)
                 if opt.explain_reg_weight > 0:
                     exp_mask_stack_all.append(exp_mask_stack)
-            total_loss = pixel_loss + smooth_loss + normal_smooth_loss + img_grad_loss + exp_loss
+            total_loss = pixel_loss + smooth_loss + exp_loss
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]
@@ -228,9 +154,13 @@ class SfMLearner(object):
         return tf.reduce_mean(l)
 
     def compute_smooth_loss(self, pred_disp):
-        dx, dy = self.gradient(pred_disp)
-        dx2, dxdy = self.gradient(dx)
-        dydx, dy2 = self.gradient(dy)
+        def gradient(pred):
+            D_dy = pred[:, 1:, :, :] - pred[:, :-1, :, :]
+            D_dx = pred[:, :, 1:, :] - pred[:, :, :-1, :]
+            return D_dx, D_dy
+        dx, dy = gradient(pred_disp)
+        dx2, dxdy = gradient(dx)
+        dydx, dy2 = gradient(dy)
         return tf.reduce_mean(tf.abs(dx2)) + \
                tf.reduce_mean(tf.abs(dxdy)) + \
                tf.reduce_mean(tf.abs(dydx)) + \
@@ -271,6 +201,9 @@ class SfMLearner(object):
         #     tf.summary.histogram(var.op.name + "/gradients", grad)
 
     def train(self, opt):
+        opt.num_source = opt.seq_length - 1
+        # TODO: currently fixed to 4
+        opt.num_scales = 4
         self.opt = opt
         self.build_train_graph()
         self.collect_summaries()
@@ -286,10 +219,10 @@ class SfMLearner(object):
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         with sv.managed_session(config=config) as sess:
-            # print('Trainable variables: ')
-            # for var in tf.trainable_variables():
-            #     print(var.name)
-            # print("parameter_count =", sess.run(parameter_count))
+            print('Trainable variables: ')
+            for var in tf.trainable_variables():
+                print(var.name)
+            print("parameter_count =", sess.run(parameter_count))
             if opt.continue_train:
                 if opt.init_checkpoint_file is None:
                     checkpoint = tf.train.latest_checkpoint(opt.checkpoint_dir)

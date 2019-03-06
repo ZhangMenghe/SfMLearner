@@ -2,7 +2,6 @@ from __future__ import division
 import os
 import random
 import tensorflow as tf
-import numpy as np
 
 class DataLoader(object):
     def __init__(self, 
@@ -18,70 +17,58 @@ class DataLoader(object):
         self.img_width = img_width
         self.num_source = num_source
         self.num_scales = num_scales
-    
-    """Load a batch of training instances.
-    """
-    def load_train_batch(self, load_semantic = False):
-        seed = random.randint(0, 2**31 - 1)
 
+    def load_train_batch(self):
+        """Load a batch of training instances.
+        """
+        seed = random.randint(0, 2**31 - 1)
         # Load the list of training files into queues
         file_list = self.format_file_list(self.dataset_dir, 'train')
-        image_path_strs = tf.data.Dataset.from_tensor_slices(file_list['image_file_list'])\
-                          .shuffle(len(file_list['image_file_list']), seed = seed)
-        cam_path_strs = tf.data.Dataset.from_tensor_slices(file_list['cam_file_list'])\
-                        .shuffle(len(file_list['cam_file_list']), seed = seed)
-        self.steps_per_epoch = int(len(file_list['image_file_list'])//self.batch_size)
+        image_paths_queue = tf.train.string_input_producer(
+            file_list['image_file_list'], 
+            seed=seed, 
+            shuffle=True)
+        cam_paths_queue = tf.train.string_input_producer(
+            file_list['cam_file_list'], 
+            seed=seed, 
+            shuffle=True)
+        self.steps_per_epoch = int(
+            len(file_list['image_file_list'])//self.batch_size)
 
-        seg_image = None
-        img_iterator = image_path_strs.make_initializable_iterator()
-        img_element = img_iterator.get_next()
+        # Load images
+        img_reader = tf.WholeFileReader()
+        _, image_contents = img_reader.read(image_paths_queue)
+        image_seq = tf.image.decode_jpeg(image_contents)
+        tgt_image, src_image_stack = \
+            self.unpack_image_sequence(
+                image_seq, self.img_height, self.img_width, self.num_source)
 
-        cam_iterator = cam_path_strs.make_initializable_iterator()
-        cam_element = cam_iterator.get_next()
-
-        with tf.Session() as sess:
-            # Load images
-            sess.run(img_iterator.initializer)
-            jpg_file_name = sess.run(img_element)
-            image_contents = tf.read_file(jpg_file_name)
-            image_seq = tf.image.decode_jpeg(image_contents)
-            tgt_image, src_image_stack = self.unpack_image_sequence(\
-                                        image_seq, self.img_height,\
-                                         self.img_width, self.num_source)
-            #if(load_semantic):
-            png_file_name = jpg_file_name[:-4]+"-seg.png"
-            seg_contents = tf.read_file(png_file_name)
-            seg_image = tf.image.decode_png(seg_contents, channels=1)
-            seg_image.set_shape([self.img_height, self.img_width, 1])
-
-            # Load camera intrinsics
-            sess.run(cam_iterator.initializer)
-            cam_contents = tf.read_file(sess.run(cam_element))
-            rec_def = []
-            for i in range(9):
-                rec_def.append([1.])
-            raw_cam_vec = tf.stack(tf.decode_csv(cam_contents, record_defaults=rec_def))
-            intrinsics = tf.reshape(raw_cam_vec, [3, 3])
-            proj_cam2pix, proj_pix2cam = self.get_multi_scale_intrinsics(intrinsics, self.num_scales)
-        
-
-
-        # TODO: Data augmentation
-        # image_all = tf.concat([tgt_image, src_image_stack], axis=3)
-        # image_all, intrinsics = self.data_augmentation(
-        #     image_all, intrinsics, self.img_height, self.img_width)
-        # tgt_image = image_all[:, :, :, :3]
-        # src_image_stack = image_all[:, :, :, 3:]
+        # Load camera intrinsics
+        cam_reader = tf.TextLineReader()
+        _, raw_cam_contents = cam_reader.read(cam_paths_queue)
+        rec_def = []
+        for i in range(9):
+            rec_def.append([1.])
+        raw_cam_vec = tf.decode_csv(raw_cam_contents, 
+                                    record_defaults=rec_def)
+        raw_cam_vec = tf.stack(raw_cam_vec)
+        intrinsics = tf.reshape(raw_cam_vec, [3, 3])
 
         # Form training batches
-        src_image_stack, tgt_image, seg_image, proj_cam2pix, proj_pix2cam = \
-                tf.train.batch([src_image_stack, tgt_image, seg_image, proj_cam2pix, proj_pix2cam], 
+        src_image_stack, tgt_image, intrinsics = \
+                tf.train.batch([src_image_stack, tgt_image, intrinsics], 
                                batch_size=self.batch_size)
 
-        return tgt_image, seg_image, src_image_stack, proj_cam2pix, proj_pix2cam
-    def load_semantic_image(self):
-        semantic_image = np.zeros([self.img_height, self.img_width, 3])
-        return semantic_image
+        # Data augmentation
+        image_all = tf.concat([tgt_image, src_image_stack], axis=3)
+        image_all, intrinsics = self.data_augmentation(
+            image_all, intrinsics, self.img_height, self.img_width)
+        tgt_image = image_all[:, :, :, :3]
+        src_image_stack = image_all[:, :, :, 3:]
+        intrinsics = self.get_multi_scale_intrinsics(
+            intrinsics, self.num_scales)
+        return tgt_image, src_image_stack, intrinsics
+
     def make_intrinsics_matrix(self, fx, fy, cx, cy):
         # Assumes batch input
         batch_size = fx.get_shape().as_list()[0]
@@ -192,19 +179,14 @@ class DataLoader(object):
         return tgt_image, src_image_stack
 
     def get_multi_scale_intrinsics(self, intrinsics, num_scales):
-        proj_cam2pix = []
+        intrinsics_mscale = []
         # Scale the intrinsics accordingly for each scale
         for s in range(num_scales):
-            fx = intrinsics[0,0]/(2 ** s)
-            fy = intrinsics[1,1]/(2 ** s)
-            cx = intrinsics[0,2]/(2 ** s)
-            cy = intrinsics[1,2]/(2 ** s)
-            r1 = tf.stack([fx, 0, cx])
-            r2 = tf.stack([0, fy, cy])
-            r3 = tf.constant([0.,0.,1.])
-            proj_cam2pix.append(tf.stack([r1, r2, r3]))
-        proj_cam2pix = tf.stack(proj_cam2pix)
-        proj_pix2cam = tf.matrix_inverse(proj_cam2pix)
-        proj_cam2pix.set_shape([num_scales,3,3])
-        proj_pix2cam.set_shape([num_scales,3,3])
-        return proj_cam2pix, proj_pix2cam
+            fx = intrinsics[:,0,0]/(2 ** s)
+            fy = intrinsics[:,1,1]/(2 ** s)
+            cx = intrinsics[:,0,2]/(2 ** s)
+            cy = intrinsics[:,1,2]/(2 ** s)
+            intrinsics_mscale.append(
+                self.make_intrinsics_matrix(fx, fy, cx, cy))
+        intrinsics_mscale = tf.stack(intrinsics_mscale, axis=1)
+        return intrinsics_mscale

@@ -7,6 +7,7 @@ import PIL.Image as pil
 from SfMLearner import SfMLearner
 
 flags = tf.app.flags
+flags.DEFINE_string("test_idx", 'data/kitti/test_files_eigen.txt', "choose files for test")
 flags.DEFINE_integer("batch_size", 4, "The size of of a sample batch")
 flags.DEFINE_integer("img_height", 128, "Image height")
 flags.DEFINE_integer("img_width", 416, "Image width")
@@ -16,8 +17,9 @@ flags.DEFINE_string("ckpt_file", None, "checkpoint file")
 FLAGS = flags.FLAGS
 
 def main(_):
-    with open('data/kitti/test_files_eigen.txt', 'r') as f:
+    with open(FLAGS.test_idx, 'r') as f:
         test_files = f.readlines()
+        test_files =[x for x in test_files if len(x)>10]
         test_files = [FLAGS.dataset_dir + t[:-1] for t in test_files]
     if not os.path.exists(FLAGS.output_dir):
         os.makedirs(FLAGS.output_dir)
@@ -44,8 +46,7 @@ def main(_):
                 idx = t + b
                 if idx >= len(test_files):
                     break
-                fh = open(test_files[idx], 'r')
-                raw_im = pil.open(fh)
+                raw_im = pil.open(test_files[idx])
                 scaled_im = raw_im.resize((FLAGS.img_width, FLAGS.img_height), pil.ANTIALIAS)
                 inputs[b] = np.array(scaled_im)
                 # im = scipy.misc.imread(test_files[idx])
