@@ -111,7 +111,17 @@ class SfMLearner(object):
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]
-            optim = tf.train.AdamOptimizer(opt.learning_rate, opt.beta1)
+            
+            if(opt.training_decay):
+                learning_rate = tf.train.exponential_decay(
+                                opt.learning_rate,   # Base learning rate.
+                                tf.Variable(0) * opt.batch_size,  # Current index into the dataset.
+                                5000,                # Decay step.
+                                0.95,                # Decay rate.
+                                staircase=True)
+            else:
+                learning_rate = opt.learning_rate
+            optim = tf.train.AdamOptimizer(learning_rate, opt.beta1)
             # self.grads_and_vars = optim.compute_gradients(total_loss, 
             #                                               var_list=train_vars)
             # self.train_op = optim.apply_gradients(self.grads_and_vars)
@@ -231,7 +241,7 @@ class SfMLearner(object):
                 print("Resume training from previous checkpoint: %s" % checkpoint)
                 self.saver.restore(sess, checkpoint)
             start_time = time.time()
-            for step in range(1, opt.max_steps):
+            for step in range(1, opt.max_steps):                    
                 fetches = {
                     "train": self.train_op,
                     "global_step": self.global_step,

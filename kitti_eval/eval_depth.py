@@ -17,6 +17,7 @@ args = parser.parse_args()
 
 def main():
     pred_depths = np.load(args.pred_file)
+    print(pred_depths.shape)
     test_files = read_text_lines(args.test_file_list)
     gt_files, gt_calib, im_sizes, im_files, cams = \
         read_file_data(test_files, args.kitti_dir)

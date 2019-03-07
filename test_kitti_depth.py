@@ -14,6 +14,7 @@ flags.DEFINE_integer("img_width", 416, "Image width")
 flags.DEFINE_string("dataset_dir", None, "Dataset directory")
 flags.DEFINE_string("output_dir", None, "Output directory")
 flags.DEFINE_string("ckpt_file", None, "checkpoint file")
+flags.DEFINE_string("pred_filename", None, "name of prediction file")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -23,7 +24,7 @@ def main(_):
         test_files = [FLAGS.dataset_dir + t[:-1] for t in test_files]
     if not os.path.exists(FLAGS.output_dir):
         os.makedirs(FLAGS.output_dir)
-    basename = os.path.basename(FLAGS.ckpt_file)
+    basename = FLAGS.pred_filename + '.npy'
     output_file = FLAGS.output_dir + '/' + basename
     sfm = SfMLearner()
     sfm.setup_inference(img_height=FLAGS.img_height,
