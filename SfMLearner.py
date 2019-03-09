@@ -12,7 +12,10 @@ from utils import *
 class SfMLearner(object):
     def __init__(self):
         pass
-    
+    def gradient(self, pred):
+        D_dy = pred[:, 1:, :, :] - pred[:, :-1, :, :]
+        D_dx = pred[:, :, 1:, :] - pred[:, :, :-1, :]
+        return D_dx, D_dy
     def build_train_graph(self):
         opt = self.opt
         loader = DataLoader(opt.dataset_dir,
@@ -42,6 +45,10 @@ class SfMLearner(object):
             pixel_loss = 0
             exp_loss = 0
             smooth_loss = 0
+
+            # more loss
+            img_grad_loss = 0
+
             tgt_image_all = []
             src_image_stack_all = []
             proj_image_stack_all = []
@@ -86,7 +93,21 @@ class SfMLearner(object):
                         pixel_loss += tf.reduce_mean(curr_proj_error * \
                             tf.expand_dims(curr_exp[:,:,:,1], -1))
                     else:
-                        pixel_loss += tf.reduce_mean(curr_proj_error) 
+                        pixel_loss += tf.reduce_mean(curr_proj_error)
+
+
+                    # Gradient Loss
+                    if opt.img_grad_weight > 0:
+                        curr_tgt_image_grad_x, curr_tgt_image_grad_y = self.gradient(curr_tgt_image[:, :-2, 1:-1, :])
+                        curr_src_image_grad_x, curr_src_image_grad_y = self.gradient(curr_src_image_stack[:, :-2, 1:-1 :])
+
+                        curr_proj_image_grad_x, curr_proj_image_grad_y = self.gradient(curr_proj_image[:, :-2, 1:-1, :])
+                        curr_proj_error_grad_x, curr_proj_error_grad_y = tf.abs(curr_tgt_image_grad_x-curr_proj_image_grad_x), \
+                                                                tf.abs(curr_tgt_image_grad_y-curr_proj_image_grad_y)
+
+                        img_grad_loss += opt.img_grad_weight * tf.reduce_mean(curr_proj_error_grad_x)
+                        img_grad_loss += opt.img_grad_weight * tf.reduce_mean(curr_proj_error_grad_y)
+
                     # Prepare images for tensorboard summaries
                     if i == 0:
                         proj_image_stack = curr_proj_image
@@ -107,7 +128,7 @@ class SfMLearner(object):
                 proj_error_stack_all.append(proj_error_stack)
                 if opt.explain_reg_weight > 0:
                     exp_mask_stack_all.append(exp_mask_stack)
-            total_loss = pixel_loss + smooth_loss + exp_loss
+            total_loss = pixel_loss + smooth_loss + exp_loss + img_grad_loss
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]
