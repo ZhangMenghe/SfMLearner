@@ -95,7 +95,10 @@ class SfMLearner(object):
                     else:
                         pixel_loss += tf.reduce_mean(curr_proj_error)
 
-
+                    # Structure Similarity
+                    if opt.ssim_weight > 0:
+                        pixel_loss += opt.ssim_weight * tf.reduce_mean(SSIM(curr_proj_image, curr_tgt_image))
+                        
                     # Gradient Loss
                     if opt.img_grad_weight > 0:
                         curr_tgt_image_grad_x, curr_tgt_image_grad_y = self.gradient(curr_tgt_image[:, :-2, 1:-1, :])
