@@ -13,7 +13,9 @@ flags.DEFINE_string("init_checkpoint_file", None, "Specific checkpoint file to i
 flags.DEFINE_float("learning_rate", 0.0002, "Learning rate of for adam")
 flags.DEFINE_float("beta1", 0.9, "Momentum term of adam")
 flags.DEFINE_float("smooth_weight", 0.5, "Weight for smoothness")
-flags.DEFINE_float("ssim_weight", 0.3, "Weight for using ssim loss in pixel loss")
+flags.DEFINE_float("normal_weight", 0.1, "Weight for smoothness")
+
+flags.DEFINE_float("ssim_weight", 0.0, "Weight for using ssim loss in pixel loss")
 flags.DEFINE_float("img_grad_weight", 0.0, "Weight for image gradient warping")
 flags.DEFINE_float("explain_reg_weight", 0.05, "Weight for explanability regularization")
 flags.DEFINE_integer("batch_size", 4, "The size of of a sample batch")
