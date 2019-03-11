@@ -14,8 +14,8 @@ flags.DEFINE_float("learning_rate", 0.0002, "Learning rate of for adam")
 flags.DEFINE_float("beta1", 0.9, "Momentum term of adam")
 flags.DEFINE_float("smooth_weight", 0.5, "Weight for depth map smoothness")
 flags.DEFINE_float("normal_weight", 0.0, "Weight for normal map smoothness")
-flags.DEFINE_float("dnrefine_weight", 0.3, "Weight for depth/normal refinement constrain")
-
+flags.DEFINE_float("dnrefine_weight", 0.0, "Weight for depth/normal refinement constrain")
+# flags.DEFINE_float("edge_mask_weight", 0.0, "Weight for edge loss")
 flags.DEFINE_float("ssim_weight", 0.0, "Weight for using ssim loss in pixel loss")
 flags.DEFINE_float("img_grad_weight", 0.0, "Weight for image gradient warping")
 flags.DEFINE_float("explain_reg_weight", 0.05, "Weight for explanability regularization")
@@ -29,6 +29,7 @@ flags.DEFINE_integer("max_steps", 120000, "Maximum number of training iterations
 flags.DEFINE_integer("summary_freq", 100, "Logging every log_freq iterations")
 flags.DEFINE_integer("save_latest_freq", 5000, \
     "Save the latest model every save_latest_freq iterations (overwrites the previous latest model)")
+flags.DEFINE_boolean("background_only", True, "Use only background(static) for depth training")
 flags.DEFINE_boolean("continue_train", False, "Continue training from previous checkpoint")
 flags.DEFINE_boolean("training_decay", True, "Continue training from previous checkpoint")
 FLAGS = flags.FLAGS

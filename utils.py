@@ -301,3 +301,39 @@ def bilinear_sampler(imgs, coords):
         w10 * im10, w11 * im11
     ])
     return output
+def maskout_partial_image(tgt_img, seg_img, target="foreground", tile_mask = False):
+    """
+        get desired partial image by semantic segmentation
+        tgt_image[batch; img_height, img_width, 3]
+        seg_image[batch; image_height, image_width, 1]
+        #11-18 labels are foreground, see cityscape labels
+    """
+    if(target == "flat_and_cons"):
+        sel_mask = seg_img<4
+        sel_mask_tile = tf.tile(sel_mask, [1,1,1,3])
+        flat_and_cons = tf.where(sel_mask_tile, tgt_img, tf.zeros_like(tgt_img))
+        others = tf.where(sel_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+        if(tile_mask):
+            return flat_and_cons, others, sel_mask_tile
+        else:
+            return flat_and_cons, others, sel_mask
+
+    select_mask_1 = tf.logical_and(seg_img >14, seg_img<19) #13.14 sky
+    select_mask_2 = tf.logical_and(seg_img >10, seg_img<13) #11.12 human and rider
+    foreground_mask =  tf.logical_or(select_mask_1,select_mask_2)
+    fg_mask_tile = tf.tile(foreground_mask, [1,1,1,3])
+    if(target != "foreground"):
+        background_mask = tf.logical_not(foreground_mask)
+        bg_mask_tile = tf.tile(background_mask, [1,1,1,3])
+
+    if(target == "foreground"):
+        return tf.where(fg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+    elif(target == "background"):
+        return tf.where(bg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+    else:
+        background = tf.where(fg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+        foreground = tf.where(bg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+        if(tile_mask):
+             return foreground,background,fg_mask_tile
+        else:   
+            return foreground,background,foreground_mask

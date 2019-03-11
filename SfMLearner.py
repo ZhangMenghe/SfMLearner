@@ -27,11 +27,22 @@ class SfMLearner(object):
                             opt.num_source,
                             opt.num_scales)
         with tf.name_scope("data_loading"):
-            tgt_image, src_image_stack, intrinsics = loader.load_train_batch()
+            # Load batch data
+            # tgt_image[batch;img_height, img_width, 3]
+            # seg_image[batch; image_height, image_width, 1]
+            # src_image[batch;img_height,img_width, num_source * 3]
+            # intrinsics [batch; 3; 3] 
+
+            tgt_image, seg_img, src_image_stack, seg_image_stack, intrinsics = loader.load_train_batch()
             tgt_image = self.preprocess_image(tgt_image)
             src_image_stack = self.preprocess_image(src_image_stack)
 
         with tf.name_scope("depth_prediction"):
+            if(self.opt.background_only):
+                _, tgt_image_fg, _ = maskout_partial_image(tgt_image, seg_img, target="both")
+                pred_disp_foreground, _ = disp_net(tgt_image_fg, is_training=True)
+                pred_depth_fore = [1./d for d in pred_disp_foreground]
+
             pred_disp, depth_net_endpoints = disp_net(tgt_image, 
                                                       is_training=True)
             pred_depth = [1./d for d in pred_disp]
@@ -72,9 +83,14 @@ class SfMLearner(object):
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])                
                 curr_src_image_stack = tf.image.resize_area(src_image_stack, 
                     [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
-                
 
-
+                if opt.background_only:
+                    # pred_depth_fore_tensor = tf.expand_dims(tf.squeeze(pred_depth_fore[s], axis=3), -1)
+                    pred_depth_fore_tensor = tf.squeeze(pred_depth_fore[s], axis=3)
+                    curr_tgt_image_fore = tf.image.resize_area(tgt_image_fg,\
+                                        [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
+                    smooth_loss+= 0.2 * opt.smooth_weight/(2**s) * \
+                        self.compute_smooth_loss(pred_disp_foreground[s])
 
                 pred_depth_tensor = tf.squeeze(pred_depth[s], axis=3)
 
@@ -101,6 +117,8 @@ class SfMLearner(object):
                     if(opt.normal_weight > 0):
                         normal_smooth_loss+=opt.smooth_weight/(2**s) * \
                             self.compute_smooth_loss(pred_normal)
+                
+                    
                 for i in range(opt.num_source):
                     # Inverse warp the source image to the target image frame
                     curr_proj_image = projective_inverse_warp(
@@ -125,6 +143,14 @@ class SfMLearner(object):
                             tf.expand_dims(curr_exp[:,:,:,1], -1))
                     else:
                         pixel_loss += tf.reduce_mean(curr_proj_error)
+                    if opt.background_only:
+                        curr_proj_image_fore = projective_inverse_warp(
+                                                curr_src_image_stack[:,:,:,3*i:3*(i+1)], 
+                                                pred_depth_fore_tensor, 
+                                                pred_poses[:,i,:], 
+                                                intrinsics[:,s,:,:])
+                        curr_proj_error_fore = tf.abs(curr_proj_image_fore - curr_tgt_image_fore)
+                        pixel_loss += 0.2 * tf.reduce_mean(curr_proj_error_fore)
 
                     # Structure Similarity
                     if opt.ssim_weight > 0:

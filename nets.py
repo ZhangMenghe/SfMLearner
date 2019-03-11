@@ -7,7 +7,7 @@ import numpy as np
 # Range of disparity/inverse depth values
 DISP_SCALING = 10
 MIN_DISP = 0.01
-
+MIN_EDGE = 0.0001
 def resize_like(inputs, ref):
     iH, iW = inputs.get_shape()[1], inputs.get_shape()[2]
     rH, rW = ref.get_shape()[1], ref.get_shape()[2]
@@ -70,11 +70,86 @@ def pose_exp_net(tgt_image, src_image_stack, do_exp=True, is_training=True):
                 mask4 = None
             end_points = utils.convert_collection_to_dict(end_points_collection)
             return pose_final, [mask1, mask2, mask3, mask4], end_points
+def edge_net(seg_image):
+    tgt_image = tf.cast(tf.tile(seg_image, [1,1,1,3]), tf.float32)
+    H = tgt_image.get_shape()[1].value
+    W = tgt_image.get_shape()[2].value
+    with tf.variable_scope('edge'):
+        cnv1  = slim.conv2d(tgt_image, 32,  [7, 7], stride=1, scope='cnv1')
+        cnv1b = slim.conv2d(cnv1,  32,  [7, 7], stride=1, scope='cnv1b')
+        cnv2  = slim.conv2d(cnv1b, 64,  [5, 5], stride=2, scope='cnv2')
+        cnv2b = slim.conv2d(cnv2,  64,  [5, 5], stride=1, scope='cnv2b')
+        cnv3  = slim.conv2d(cnv2b, 128, [3, 3], stride=2, scope='cnv3')
+        cnv3b = slim.conv2d(cnv3,  128, [3, 3], stride=1, scope='cnv3b')
+        cnv4  = slim.conv2d(cnv3b, 256, [3, 3], stride=2, scope='cnv4')
+        cnv4b = slim.conv2d(cnv4,  256, [3, 3], stride=1, scope='cnv4b')
+        cnv5  = slim.conv2d(cnv4b, 512, [3, 3], stride=2, scope='cnv5')
+        cnv5b = slim.conv2d(cnv5,  512, [3, 3], stride=1, scope='cnv5b')
+        cnv6  = slim.conv2d(cnv5b, 512, [3, 3], stride=2, scope='cnv6')
+        cnv6b = slim.conv2d(cnv6,  512, [3, 3], stride=1, scope='cnv6b')
+        cnv7  = slim.conv2d(cnv6b, 512, [3, 3], stride=2, scope='cnv7')
+        cnv7b = slim.conv2d(cnv7,  512, [3, 3], stride=1, scope='cnv7b')
 
+        upcnv7_e = slim.conv2d_transpose(cnv7b, 512, [4, 4], stride=2, scope='upcnv7')
+        # There might be dimension mismatch due to uneven down/up-sampling
+        upcnv7_e = resize_like(upcnv7_e, cnv6b)
+        i7_in_e  = tf.concat([upcnv7_e, cnv6b], axis=3)
+        icnv7_e  = slim.conv2d(i7_in_e, 512, [3, 3], stride=1, scope='icnv7')
+
+        upcnv6_e = slim.conv2d_transpose(icnv7_e, 512, [4, 4], stride=2, scope='upcnv6')
+        upcnv6_e = resize_like(upcnv6_e, cnv5b)
+        i6_in_e  = tf.concat([upcnv6_e, cnv5b], axis=3)
+        icnv6_e  = slim.conv2d(i6_in_e, 512, [3, 3], stride=1, scope='icnv6'    )
+
+        upcnv5_e = slim.conv2d_transpose(icnv6_e, 256, [4, 4], stride=2, scope='upcnv5')
+        upcnv5_e = resize_like(upcnv5_e, cnv4b)
+        i5_in_e  = tf.concat([upcnv5_e, cnv4b], axis=3)
+        icnv5_e  = slim.conv2d(i5_in_e, 256, [3, 3], stride=1, scope='icnv5')
+
+        upcnv4_e = slim.conv2d_transpose(icnv5_e, 128, [4, 4], stride=2, scope='upcnv4')
+        i4_in_e  = tf.concat([upcnv4_e, cnv3b], axis=3)
+        icnv4_e  = slim.conv2d(i4_in_e, 128, [3, 3], stride=1, scope='icnv4')
+        edge4  = slim.conv2d(icnv4_e, 1,   [3, 3], stride=1, 
+            activation_fn=tf.sigmoid, normalizer_fn=None, scope='edge4') + MIN_EDGE
+        edge4 = tf.image.resize_nearest_neighbor(edge4, [H//8,W//8])
+        # edge4_up = tf.image.resize_bilinear(edge4, [np.int(H/4), np.int(W/4)])
+        edge4_up = tf.image.resize_nearest_neighbor(edge4, [np.int(H/2), np.int(W/2)])
+
+        upcnv3_e = slim.conv2d_transpose(icnv4_e, 64,  [4, 4], stride=2, scope='upcnv3')
+        i3_in_e  = tf.concat([upcnv3_e, cnv2b, edge4_up], axis=3)
+        # i3_in_e  = tf.concat([upcnv3_e, cnv2b], axis=3)
+        icnv3_e  = slim.conv2d(i3_in_e, 64,  [3, 3], stride=1, scope='icnv3')
+        edge3  = slim.conv2d(icnv3_e, 1,   [3, 3], stride=1, 
+            activation_fn=tf.sigmoid, normalizer_fn=None, scope='edge3') + MIN_EDGE
+        edge3 = tf.image.resize_nearest_neighbor(edge3, [H//4,W//4])
+        # edge3_up = tf.image.resize_bilinear(edge3, [np.int(H/2), np.int(W/2)])
+        cnv1b_shape = cnv1b.get_shape().as_list()
+        edge3_up = tf.image.resize_nearest_neighbor(edge3, [np.int(H/2), np.int(W/2)])
+        edge3_up = tf.image.resize_nearest_neighbor(edge3_up, [cnv1b_shape[1], cnv1b_shape[2]])
+        upcnv2_e = slim.conv2d_transpose(icnv3_e, 32,  [4, 4], stride=2, scope='upcnv2')
+        upcnv2_e = tf.image.resize_nearest_neighbor(upcnv2_e, [cnv1b_shape[1], cnv1b_shape[2]])
+        i2_in_e  = tf.concat([upcnv2_e, cnv1b, edge3_up], axis=3)
+        # i2_in_e  = tf.concat([upcnv2_e, cnv1b], axis=3)
+        icnv2_e  = slim.conv2d(i2_in_e, 32,  [3, 3], stride=1, scope='icnv2')
+        edge2  = slim.conv2d(icnv2_e, 1,   [3, 3], stride=1, 
+            activation_fn=tf.sigmoid, normalizer_fn=None, scope='edge2') + MIN_EDGE
+        edge2 = tf.image.resize_nearest_neighbor(edge2, [H//2,W//2])
+        # edge2_up = tf.image.resize_bilinear(edge2, [H, W])
+        edge2_up = tf.image.resize_nearest_neighbor(edge2, [H, W])
+
+        upcnv1_e = slim.conv2d_transpose(icnv2_e, 16,  [4, 4], stride=2, scope='upcnv1')
+        edge2_up = tf.image.resize_nearest_neighbor(edge2, [upcnv1_e.get_shape().as_list()[1], upcnv1_e.get_shape().as_list()[2]])
+        i1_in_e  = tf.concat([upcnv1_e, edge2_up], axis=3)
+        # i1_in_e  = tf.concat([upcnv1_e], axis=3)
+        icnv1_e  = slim.conv2d(i1_in_e, 16,  [3, 3], stride=1, scope='icnv1')
+        edge1  = slim.conv2d(icnv1_e, 1,   [3, 3], stride=1,
+            activation_fn=tf.sigmoid, normalizer_fn=None, scope='edge1') + MIN_EDGE
+        edge1 = tf.image.resize_nearest_neighbor(edge1, [H,W])
+    return  [edge1, edge2, edge3, edge4]
 def disp_net(tgt_image, is_training=True):
     H = tgt_image.get_shape()[1].value
     W = tgt_image.get_shape()[2].value
-    with tf.variable_scope('depth_net') as sc:
+    with tf.variable_scope('depth_net', reuse=tf.AUTO_REUSE) as sc:
         end_points_collection = sc.original_name_scope + '_end_points'
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
                             normalizer_fn=None,
