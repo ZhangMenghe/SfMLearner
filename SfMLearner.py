@@ -39,8 +39,10 @@ class SfMLearner(object):
 
         with tf.name_scope("depth_prediction"):
             if(self.opt.background_only):
-                _, tgt_image_fg, _ = maskout_partial_image(tgt_image, seg_img, target="both")
-                pred_disp_foreground, _ = disp_net(tgt_image_fg, is_training=True)
+                tgt_image_fg, tgt_image_bg, foreground_msk = maskout_partial_image(tgt_image, seg_img, target="both")
+                src_image_stack_fore, src_image_stack_bg = maskout_partial_image(src_image_stack, seg_image_stack, target="stack")
+                
+                pred_disp_foreground, _ = disp_net(tgt_image_fg, is_training=True, scope_name="fore")
                 pred_depth_fore = [1./d for d in pred_disp_foreground]
 
             pred_disp, depth_net_endpoints = disp_net(tgt_image, 
@@ -48,12 +50,21 @@ class SfMLearner(object):
             pred_depth = [1./d for d in pred_disp]
 
         with tf.name_scope("pose_and_explainability_prediction"):
-            pred_poses, pred_exp_logits, pose_exp_net_endpoints = \
-                pose_exp_net(tgt_image,
-                             src_image_stack, 
-                             do_exp=(opt.explain_reg_weight > 0),
-                             is_training=True)
-
+            if(self.opt.background_only):
+                pred_poses, pred_exp_logits, pose_exp_net_endpoints = \
+                    pose_exp_net(tgt_image_bg,
+                                src_image_stack_bg, 
+                                do_exp=(opt.explain_reg_weight > 0),
+                                is_training=True)
+            else:
+                pred_poses, pred_exp_logits, pose_exp_net_endpoints = \
+                    pose_exp_net(tgt_image,
+                    src_image_stack, 
+                    do_exp=(opt.explain_reg_weight > 0),
+                    is_training=True)    
+        with tf.name_scope('get_edge_mask'):
+            if(opt.edge_mask_weight > 0):
+                edge_image = edge_net(seg_img)
         with tf.name_scope("compute_loss"):
             pixel_loss = 0
             exp_loss = 0
@@ -63,6 +74,7 @@ class SfMLearner(object):
             img_grad_loss = 0
             normal_smooth_loss = 0
             depth_from_normal_smooth = 0
+            edge_loss = 0
 
             # Depth-Normal Constrains
             pred_normals = []
@@ -87,9 +99,12 @@ class SfMLearner(object):
                 if opt.background_only:
                     # pred_depth_fore_tensor = tf.expand_dims(tf.squeeze(pred_depth_fore[s], axis=3), -1)
                     pred_depth_fore_tensor = tf.squeeze(pred_depth_fore[s], axis=3)
+                    curr_src_image_stack_fore = tf.image.resize_area(src_image_stack_fore, 
+                    [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
+
                     curr_tgt_image_fore = tf.image.resize_area(tgt_image_fg,\
                                         [int(opt.img_height/(2**s)), int(opt.img_width/(2**s))])
-                    smooth_loss+= 0.2 * opt.smooth_weight/(2**s) * \
+                    smooth_loss+= opt.fore_weight * opt.smooth_weight/(2**s) * \
                         self.compute_smooth_loss(pred_disp_foreground[s])
 
                 pred_depth_tensor = tf.squeeze(pred_depth[s], axis=3)
@@ -145,12 +160,19 @@ class SfMLearner(object):
                         pixel_loss += tf.reduce_mean(curr_proj_error)
                     if opt.background_only:
                         curr_proj_image_fore = projective_inverse_warp(
-                                                curr_src_image_stack[:,:,:,3*i:3*(i+1)], 
+                                                curr_src_image_stack_fore[:,:,:,3*i:3*(i+1)], 
                                                 pred_depth_fore_tensor, 
                                                 pred_poses[:,i,:], 
                                                 intrinsics[:,s,:,:])
                         curr_proj_error_fore = tf.abs(curr_proj_image_fore - curr_tgt_image_fore)
-                        pixel_loss += 0.2 * tf.reduce_mean(curr_proj_error_fore)
+                        pixel_loss += opt.fore_weight * tf.reduce_mean(curr_proj_error_fore)
+                    
+                    if opt.edge_mask_weight > 0:
+                        ref_edge_mask = self.get_reference_explain_mask(s)[:,:,:,0]
+                        curr_edge_img = edge_image[s]
+
+                        edge_loss += tf.multiply(opt.edge_mask_weight/(2**s), \
+                            tf.reduce_mean(tf.square(tf.squeeze(curr_edge_img)-ref_edge_mask)))
 
                     # Structure Similarity
                     if opt.ssim_weight > 0:
@@ -188,7 +210,7 @@ class SfMLearner(object):
                 proj_error_stack_all.append(proj_error_stack)
                 if opt.explain_reg_weight > 0:
                     exp_mask_stack_all.append(exp_mask_stack)
-            total_loss = pixel_loss + smooth_loss + exp_loss + img_grad_loss + normal_smooth_loss+depth_from_normal_smooth
+            total_loss = pixel_loss + smooth_loss + exp_loss + img_grad_loss + normal_smooth_loss+depth_from_normal_smooth + edge_loss
 
         with tf.name_scope("train_op"):
             train_vars = [var for var in tf.trainable_variables()]
@@ -310,17 +332,19 @@ class SfMLearner(object):
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         with sv.managed_session(config=config) as sess:
-            print('Trainable variables: ')
-            for var in tf.trainable_variables():
-                print(var.name)
-            print("parameter_count =", sess.run(parameter_count))
+            # print('Trainable variables: ')
+            # for var in tf.trainable_variables():
+            #     print(var.name)
+            # print("parameter_count =", sess.run(parameter_count))
             if opt.continue_train:
+                sess.graph._unsafe_unfinalize()
                 if opt.init_checkpoint_file is None:
                     checkpoint = tf.train.latest_checkpoint(opt.checkpoint_dir)
                 else:
                     checkpoint = opt.init_checkpoint_file
                 print("Resume training from previous checkpoint: %s" % checkpoint)
-                self.saver.restore(sess, checkpoint)
+                # self.saver.restore(sess, checkpoint)
+                optimistic_restore(sess, checkpoint)
             start_time = time.time()
             for step in range(1, opt.max_steps):                    
                 fetches = {
@@ -351,11 +375,59 @@ class SfMLearner(object):
 
                 if step % self.steps_per_epoch == 0:
                     self.save(sess, opt.checkpoint_dir, gs)
+    def build_normal_test_graph(self, pred_mode='direct'):
+        input_uint8 = tf.placeholder(tf.uint8, \
+                                    [self.batch_size, self.img_height, self.img_width, 3],\
+                                    name='raw_input')
+        input_mc = self.preprocess_image(input_uint8)
 
+        gt_depth_image = tf.placeholder(tf.uint8,\
+                                    [self.batch_size, self.img_height,self.img_width],\
+                                    name="gt_depth")
+        gt_depth_tensor = self.preprocess_image(gt_depth_image)
+
+        intrinsics = tf.placeholder(tf.float32,\
+                                    [self.batch_size, 3, 3],\
+                                    name="intrinsic")
+
+        cam_mat = intrinsics[:,:,:] #[batch;3;3]
+        # just extract fx, fy, cx, cy of each intrinsic[batch; 4]
+        intrinsic_params = tf.concat([tf.expand_dims(cam_mat[:,0,0],1),\
+                                    tf.expand_dims(cam_mat[:,1,1],1), \
+                                    tf.expand_dims(cam_mat[:,0,2],1), \
+                                    tf.expand_dims(cam_mat[:,1,2],1)], 1)
+
+        gt_norm = depth2normal_layer_batch(gt_depth_tensor, intrinsic_params, False)
+
+        if(pred_mode == 'direct'):
+            with tf.name_scope("normal_prediction"):
+                #Ted DO STH!!
+                pred_norm, depth_net_endpoints = disp_net(input_mc, is_training=False)
+                pred_norm = pred_norm[0]
+        else:
+            with tf.name_scope("normal_from_depth"):
+                pred_disp, depth_net_endpoints = disp_net(input_mc, is_training=False)
+                pred_depth = [1./disp for disp in pred_disp]
+                pred_depth_tensor = tf.squeeze(pred_depth[0], axis=3)
+                pred_norm = depth2normal_layer_batch(pred_depth_tensor, intrinsic_params, False)
+                
+        self.inputs = input_uint8
+        self.intrinsic = intrinsics
+        self.gtdepth = gt_depth_image
+        self.pred_norm = pred_norm
+        self.gt_norm = gt_norm
+        self.pred_depth = pred_depth[0]
+        
     def build_depth_test_graph(self):
         input_uint8 = tf.placeholder(tf.uint8, [self.batch_size, 
                     self.img_height, self.img_width, 3], name='raw_input')
         input_mc = self.preprocess_image(input_uint8)
+        # if(opt.background_only):
+        #     input_uint8_seg = tf.placeholder(tf.uint8, [self.batch_size, 
+        #                 self.img_height, self.img_width, 3], name='raw_input_seg')
+        #     input_mc_seg = self.preprocess_image(input_uint8_seg)
+
+
         with tf.name_scope("depth_prediction"):
             pred_disp, depth_net_endpoints = disp_net(
                 input_mc, is_training=False)
@@ -406,16 +478,24 @@ class SfMLearner(object):
             self.seq_length = seq_length
             self.num_source = seq_length - 1
             self.build_pose_test_graph()
+        if self.mode == 'norm':
+            self.build_normal_test_graph(pred_mode="indirect")
 
     def inference(self, inputs, sess, mode='depth'):
         fetches = {}
         if mode == 'depth':
             fetches['depth'] = self.pred_depth
         if mode == 'pose':
-            fetches['pose'] = self.pred_poses
+            fetches['pose'] = self.pred_poses            
         results = sess.run(fetches, feed_dict={self.inputs:inputs})
         return results
-
+    def inference_normal(self, rgb, depth, intrinsic, sess):
+        fetches = {}
+        fetches['normal'] = self.pred_norm
+        fetches['gtnormal'] = self.gt_norm
+        fetches['pdepth'] =  self.pred_depth 
+        results = sess.run(fetches, feed_dict={self.inputs:rgb, self.gtdepth:depth,self.intrinsic:intrinsic})
+        return results
     def save(self, sess, checkpoint_dir, step):
         model_name = 'model'
         print(" [*] Saving checkpoint to %s..." % checkpoint_dir)

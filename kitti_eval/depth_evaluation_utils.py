@@ -8,6 +8,27 @@ from collections import Counter
 import pickle
 import sys
 
+
+def compute_error_3d(gt, pred,plus = 1e-5):
+    pred_mask_norm = sum([pred[:,i]**2 for i in range(3)])
+    gt_mask_norm = sum([gt[:,i]**2 for i in range(3)])
+    thresh = np.maximum((gt_mask_norm / (pred_mask_norm + plus)), (pred_mask_norm / (gt_mask_norm+plus)))
+    a1 = (thresh < 0.9   ).mean()
+    a2 = (thresh < 0.9 ** 2).mean()
+    a3 = (thresh < 0.9 ** 3).mean()  
+
+    rmse = sum((gt[:,i]-pred[:,i])**2 for i in range(3))
+    rmse = np.sqrt(rmse.mean())
+    
+    rmse_log = (np.log(gt_mask_norm + plus) - np.log(pred_mask_norm + plus)) ** 2
+    rmse_log = np.sqrt(rmse_log.mean())
+
+    abs_rel = np.mean(np.sum(np.abs(gt- pred), axis=1) / (np.sum(gt, axis=1) + plus))
+    
+    sq_rel = sum((gt[:,i]-pred[:,i])**2 / (np.sum(gt, axis=1) + plus) for i in range(3))
+    sq_rel = np.mean(sq_rel)
+    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+
 def compute_errors(gt, pred):
     thresh = np.maximum((gt / pred), (pred / gt))
     a1 = (thresh < 1.25   ).mean()
