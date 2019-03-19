@@ -4,6 +4,26 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 
+def optimistic_restore(session, save_file):
+    reader = tf.train.NewCheckpointReader(save_file)
+    saved_shapes = reader.get_variable_to_shape_map()
+    var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables() if var.name.split(':')[0] in saved_shapes])
+    
+    restore_vars = []
+    
+    name2var = dict(zip(map(lambda x: x.name.split(':')[0],\
+                    tf.global_variables()),\
+                    tf.global_variables()))
+    with tf.variable_scope('', reuse=True):
+        for var_name, saved_var_name in var_names:
+            curr_var = name2var[saved_var_name]
+            var_shape = curr_var.get_shape().as_list()
+            if var_shape == saved_shapes[saved_var_name]:
+                restore_vars.append(curr_var)
+
+    saver = tf.train.Saver(restore_vars)
+    saver.restore(session, save_file)
+    
 def gray2rgb(im, cmap='gray'):
     cmap = plt.get_cmap(cmap)
     rgba_img = cmap(im.astype(np.float32))
@@ -301,6 +321,18 @@ def bilinear_sampler(imgs, coords):
         w10 * im10, w11 * im11
     ])
     return output
+def get_msks(seg_img):
+    if(len(seg_img.shape) < 4):
+      seg_img = tf.expand_dims(seg_img, -1)
+
+    select_mask_1 = tf.logical_and(seg_img >14, seg_img<19) #13.14 sky
+    select_mask_2 = tf.logical_and(seg_img >10, seg_img<13) #11.12 human and rider
+    foreground_mask =  tf.logical_or(select_mask_1,select_mask_2)
+    fg_mask_tile = tf.tile(foreground_mask, [1,1,1,3])
+    background_mask = tf.logical_not(foreground_mask)
+    bg_mask_tile = tf.tile(background_mask, [1,1,1,3])
+    return foreground_mask, background_mask, fg_mask_tile, bg_mask_tile
+
 def maskout_partial_image(tgt_img, seg_img, target="foreground", tile_mask = False):
     """
         get desired partial image by semantic segmentation
@@ -317,22 +349,27 @@ def maskout_partial_image(tgt_img, seg_img, target="foreground", tile_mask = Fal
             return flat_and_cons, others, sel_mask_tile
         else:
             return flat_and_cons, others, sel_mask
-
-    select_mask_1 = tf.logical_and(seg_img >14, seg_img<19) #13.14 sky
-    select_mask_2 = tf.logical_and(seg_img >10, seg_img<13) #11.12 human and rider
-    foreground_mask =  tf.logical_or(select_mask_1,select_mask_2)
-    fg_mask_tile = tf.tile(foreground_mask, [1,1,1,3])
-    if(target != "foreground"):
-        background_mask = tf.logical_not(foreground_mask)
-        bg_mask_tile = tf.tile(background_mask, [1,1,1,3])
+    
+    if(target == "stack"):
+        fores, backs = [], []
+        for i in range(2):
+            foreground_mask, background_mask, fg_mask_tile, bg_mask_tile = get_msks(seg_img[:,:,:,i])
+            curr_src =tf.slice(tgt_img,[0, 0, 0, 3*i],[-1, -1, -1, 3])
+            foreground = tf.where(fg_mask_tile, curr_src, tf.zeros_like(curr_src))
+            background = tf.where(bg_mask_tile, curr_src, tf.zeros_like(curr_src))
+            fores.append(foreground)
+            backs.append(background)
+        return tf.concat([fores[0], fores[1]],axis=3), tf.concat([backs[0], backs[1]],axis=3)
+        
+    foreground_mask, background_mask, fg_mask_tile, bg_mask_tile = get_msks(seg_img)
 
     if(target == "foreground"):
-        return tf.where(fg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+        return tf.where(fg_mask_tile, tgt_img, tf.zeros_like(tgt_img))
     elif(target == "background"):
-        return tf.where(bg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+        return tf.where(bg_mask_tile, tgt_img, tf.zeros_like(tgt_img))
     else:
-        background = tf.where(fg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
-        foreground = tf.where(bg_mask_tile, tf.zeros_like(tgt_img), tgt_img)
+        background = tf.where(fg_mask_tile, tgt_img, tf.zeros_like(tgt_img))
+        foreground = tf.where(bg_mask_tile, tgt_img, tf.zeros_like(tgt_img))
         if(tile_mask):
              return foreground,background,fg_mask_tile
         else:   

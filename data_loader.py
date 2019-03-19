@@ -30,7 +30,7 @@ class DataLoader(object):
         self.steps_per_epoch = int(len(file_list['image_file_list'])//self.batch_size)
 
         seg_image = None
-        set_image_stack = None
+        seg_image_stack = None
         img_iterator = image_path_strs.make_initializable_iterator()
         img_element = img_iterator.get_next()
 
@@ -51,11 +51,16 @@ class DataLoader(object):
                                         image_seq, self.img_height,\
                                          self.img_width, self.num_source)
             #if(load_semantic):
-            png_file_name = jpg_file_name[:-4]+"-seg.png"
+            # png_file_name = jpg_file_name[:-4]+"-seg.png"
+            png_file_name = jpg_file_name[:-4]+"-segque.png"
             seg_contents = tf.read_file(png_file_name)
             seg_image = tf.image.decode_png(seg_contents, channels=1)
-            seg_image.set_shape([self.img_height, self.img_width, 1])
-            seg_image = tf.cast(seg_image/255*19, tf.uint8)
+            # seg_image.set_shape([self.img_height, self.img_width, 1])
+            seg_image_queue = tf.cast(seg_image/255*19, tf.uint8)
+
+            seg_image, seg_image_stack = self.unpack_image_sequence(\
+                            seg_image_queue, self.img_height,\
+                                self.img_width, self.num_source, channels=1)
 
             # Load camera intrinsics
             sess.run(cam_iterator.initializer)
@@ -67,19 +72,20 @@ class DataLoader(object):
             intrinsics = tf.reshape(raw_cam_vec, [3, 3])
         
         # Form training batches
-        src_image_stack, tgt_image, seg_image, intrinsics = \
-                tf.train.batch([src_image_stack, tgt_image, seg_image, intrinsics], 
+        src_image_stack,seg_image_stack, tgt_image, seg_image, intrinsics = \
+                tf.train.batch([src_image_stack, seg_image_stack, tgt_image, seg_image, intrinsics], 
                                batch_size=self.batch_size)
         
-        image_all = tf.concat([tgt_image, src_image_stack, seg_image], axis=3)
+        image_all = tf.concat([tgt_image, src_image_stack, seg_image_stack, seg_image], axis=3)
         image_all, intrinsics = self.data_augmentation(
             image_all, intrinsics, self.img_height, self.img_width)
         tgt_image = image_all[:, :, :, :3]
-        src_image_stack = image_all[:, :, :, 3:-1]
+        src_image_stack = image_all[:, :, :, 3:9]
+        seg_image_stack = image_all[:, :, :, 9:11]
         seg_image = tf.expand_dims(image_all[:,:,:,-1],axis=-1)
         intrinsics = self.get_multi_scale_intrinsics(intrinsics, self.num_scales)
 
-        return tgt_image, seg_image, src_image_stack, set_image_stack, intrinsics
+        return tgt_image, seg_image, src_image_stack, seg_image_stack, intrinsics
 
     def make_intrinsics_matrix(self, fx, fy, cx, cy):
         # Assumes batch input
@@ -142,7 +148,7 @@ class DataLoader(object):
         all_list['cam_file_list'] = cam_file_list
         return all_list
 
-    def unpack_image_sequence(self, image_seq, img_height, img_width, num_source):
+    def unpack_image_sequence(self, image_seq, img_height, img_width, num_source, channels = 3):
         # Assuming the center image is the target frame
         tgt_start_idx = int(img_width * (num_source//2))
         tgt_image = tf.slice(image_seq, 
@@ -164,8 +170,8 @@ class DataLoader(object):
                                     for i in range(num_source)], axis=2)
         src_image_stack.set_shape([img_height, 
                                    img_width, 
-                                   num_source * 3])
-        tgt_image.set_shape([img_height, img_width, 3])
+                                   num_source * channels])
+        tgt_image.set_shape([img_height, img_width, channels])
         return tgt_image, src_image_stack
 
     def batch_unpack_image_sequence(self, image_seq, img_height, img_width, num_source):

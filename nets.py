@@ -146,10 +146,10 @@ def edge_net(seg_image):
             activation_fn=tf.sigmoid, normalizer_fn=None, scope='edge1') + MIN_EDGE
         edge1 = tf.image.resize_nearest_neighbor(edge1, [H,W])
     return  [edge1, edge2, edge3, edge4]
-def disp_net(tgt_image, is_training=True):
+def disp_net(tgt_image, is_training=True,scope_name="whole"):
     H = tgt_image.get_shape()[1].value
     W = tgt_image.get_shape()[2].value
-    with tf.variable_scope('depth_net', reuse=tf.AUTO_REUSE) as sc:
+    with tf.variable_scope(scope_name) as sc:
         end_points_collection = sc.original_name_scope + '_end_points'
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
                             normalizer_fn=None,
