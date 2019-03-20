@@ -11,6 +11,27 @@ parser.add_argument('--min_limit', type=float, default=1e-3, help="Threshold for
 parser.add_argument('--max_limit', type=float, default=80, help="Threshold for maximum depth")
 args = parser.parse_args()
 
+def compute_error_angle(gt, pred, plus=1e-5):
+    #input [N,3] groundtruth norm and [N,3] pred
+    num  = gt.shape[0]
+    dot_product = np.sum(np.multiply(gt,pred),axis=1)
+    norm_gt = np.linalg.norm(gt, axis=1)
+    norm_pred = np.linalg.norm(pred, axis=1)
+    mcos = dot_product/(np.multiply(norm_gt, norm_pred)+1e-5)
+    radients = np.arccos(np.clip(mcos, -1, 1))
+    angle = np.degrees(radients)
+
+    a1 = len(angle[angle<11.5]) / num
+    a2 = len(angle[angle<22.5]) / num
+    a3 = len(angle[angle<30]) / num
+    
+    a_mean = np.mean(angle)
+    a_median = np.median(angle)
+    rmse = np.sqrt(np.sum(radients ** 2))
+    
+    return rmse,a_mean,a_median,a1,a2,a3
+    
+
 def main():
     gt_norm = np.load(args.gt_file)
     pred_norm = np.load(args.pred_file)
@@ -26,6 +47,14 @@ def main():
     a1      = np.zeros(num_test, np.float32)
     a2      = np.zeros(num_test, np.float32)
     a3      = np.zeros(num_test, np.float32)
+
+    a_mean = np.zeros(num_test, np.float32)
+    a_median= np.zeros(num_test, np.float32)
+    a_rmse= np.zeros(num_test, np.float32)
+    a_a1      = np.zeros(num_test, np.float32)
+    a_a2      = np.zeros(num_test, np.float32)
+    a_a3      = np.zeros(num_test, np.float32)
+
     for i in range(num_test):    
         gt_normi = gt_norm[i]
         
@@ -51,10 +80,14 @@ def main():
 
         pred_normi[mask_norm < args.min_limit,:] = [args.min_limit]*3
         pred_normi[mask_norm > args.max_limit,:] = [args.max_limit]*3
-        abs_rel[i], sq_rel[i], rms[i], log_rms[i], a1[i], a2[i], a3[i] = \
-            compute_error_3d(gt_normi[mask], pred_normi[mask])
-
-    print("{:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}".format('abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all', 'a1', 'a2', 'a3'))
-    print("{:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}".format(abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean()))
+        # abs_rel[i], sq_rel[i], rms[i], log_rms[i], a1[i], a2[i], a3[i] = \
+        #     compute_error_3d(gt_normi[mask], pred_normi[mask])
+        a_rmse[i],a_mean[i],a_median[i], a_a1[i], a_a2[i], a_a3[i] = \
+        compute_error_angle(gt_normi[mask], pred_normi[mask])
+        
+    print("{:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}".format('rms', 'mean', 'median', 'a1', 'a2', 'a3'))
+    print("{:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}".format(a_rmse.mean(), a_mean.mean(), a_median.mean(), a_a1.mean(), a_a2.mean(), a_a3.mean()))
+    # print("{:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}".format('abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all', 'a1', 'a2', 'a3'))
+    # print("{:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}".format(abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean()))
 
 main()
